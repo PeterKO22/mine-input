@@ -1,0 +1,10 @@
+--------- beginning of main
+11-04 04:18:12.046 16321 16368 I W15POC  : data staged shared=[default.yaml, key_bindings.yaml, ping_wubi_mixed.schema.yaml, pinyin_simp.dict.yaml, pinyin_simp.schema.yaml, punctuation.yaml, symbols.yaml, wubi86.dict.yaml] user=[custom_phrase.txt, installation.yaml, build, user.yaml, wubi86.userdb, pinyin_simp.userdb]
+11-04 04:18:12.107 16321 16368 I W15POC  : startupRime returned in 211ms (deploy may be async)
+11-04 04:18:14.182 16321 16368 I W15POC  : selectRimeSchema(ping_wubi_mixed)=true current=ping_wubi_mixed deployTotal=2287ms
+11-04 04:18:14.184 16321 16368 I W15POC  : RESULT|seq=w|input=w|n=8|1=人()|2=他(~b)|3=个(~h)|4=会(~f)|5=全(~g)|6=公(~c)|7=代(~a)|8=仍(~e)
+11-04 04:18:14.187 16321 16368 I W15POC  : RESULT|seq=gggg|input=gggg|n=8|1=王()|2=五一()|3=琵琶()|4=龶()|5=广告广告()|6=广告()|7=刚刚()|8=哥哥()
+11-04 04:18:14.189 16321 16368 I W15POC  : RESULT|seq=pinyin|input=pinyin|n=8|1=拼音()|2=宵憱( ☯ )|3=品()|4=拼()|5=频()|6=贫()|7=聘()|8=嫔()
+11-04 04:18:14.190 16321 16368 I W15POC  : RESULT|seq=nihao|input=nihao|n=8|1=你好()|2=悄虚( ☯ )|3=你()|4=拟()|5=尼()|6=呢()|7=泥()|8=妳()
+11-04 04:18:14.192 16321 16368 I W15POC  : RESULT|seq=zni|input=zni|n=8|1=找你()|2=祝你()|3=阻尼()|4=珍妮()|5=你(wq wqi wqiy)|6=拟(rny rnyw)|7=尼(nx nxv)|8=呢(knx knxn)
+11-04 04:18:14.194 16321 16368 I W15POC  : DONE all cases ok, total=2299ms

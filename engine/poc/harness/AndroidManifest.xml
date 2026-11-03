@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- W15 librime-android-poc：外部 IMS 复用 Trime librime_jni.so 的最小宿主 APK。
+     与 Trime 完全不同的包名/清单，仅借用其 classes.dex 中的 JNI 胶水类 + librime_jni.so。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.mineinput.engine.rimepoc"
+    android:versionCode="1"
+    android:versionName="0.1.0-w15">
+
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
+
+    <application
+        android:label="W15 Rime POC"
+        android:debuggable="true"
+        android:extractNativeLibs="true">
+        <activity
+            android:name=".RimePocActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
