@@ -1,0 +1,13 @@
+# build/ 是 W1 车道的脚本/报告目录；以下模式是其它车道 `cmake -B build` 的
+# 构建产物（W3 ai-spi 等），不得入库。
+CMakeCache.txt
+CMakeFiles/
+Testing/
+Makefile
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+ai/
+tests/
+*.a
+*.o
