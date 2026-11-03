@@ -6,7 +6,11 @@
 #       → ingest(合法/非法) → suggest SSE（含 W10 真模型 case 11b–11e）→ 401 负例
 #
 # 用法：BASE_URL=http://localhost:8088 ./smoke.sh   （默认与 docker-compose.yml 的 HUB_PORT 一致）
-# 真模型 case（11b–11e）需 compose --profile model 起 llama 服务；
+# 真模型 case（11b–11e）需真后端在线：
+#   默认档 = 宿主机原生 7B（models/run-llama-native.sh start，宿主端口 8092）
+#   降级档 = compose --profile model 的 0.5B（MODEL_HEALTH_URL=http://localhost:8091/health）
+# 真后端档位断言（W13）：SMOKE_EXPECT_MODEL=<done 帧 model 须含的子串>，
+#   如 SMOKE_EXPECT_MODEL=qwen2.5-7b ./smoke.sh 断言真 7B 后端；
 # 仅跑桩链路时：SMOKE_MODEL_REQUIRED=0 ./smoke.sh（11b–11e 降级为 SKIP）
 set -u
 
@@ -215,7 +219,11 @@ N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
 
 # ------------------------------------------- 11b. suggest 真模型（W10，continuation）
 MODEL_REQUIRED="${SMOKE_MODEL_REQUIRED:-1}"
-MODEL_HEALTH_URL="${MODEL_HEALTH_URL:-http://localhost:8091/health}"
+# 默认健康检查地址跟随默认后端（宿主机原生 7B :8092）；降级档 0.5B 传
+# MODEL_HEALTH_URL=http://localhost:8091/health
+MODEL_HEALTH_URL="${MODEL_HEALTH_URL:-http://localhost:8092/health}"
+# 真后端档位断言（W13）：SMOKE_EXPECT_MODEL=<done 帧 model 须含的子串>，如 qwen2.5-7b
+EXPECT_MODEL="${SMOKE_EXPECT_MODEL:-}"
 
 if [ "$MODEL_REQUIRED" = "0" ]; then
   say "11b–11e. suggest 真模型 case（SMOKE_MODEL_REQUIRED=0 → SKIP）"
@@ -232,6 +240,33 @@ else
   contains "suggestion 帧 source 标注真模型" "$SSE" '"source": "llama.cpp'
   N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
   [ "$N_SUG" -ge 2 ]; check "真模型流式多帧（suggestion 帧数=${N_SUG:-0}）" $?
+
+  if [ -n "$EXPECT_MODEL" ]; then
+    # W13：真后端档位断言——解析 done 帧 model 字段（诚实标注），断言含期望子串
+    DONE_MODEL=$(printf '%s' "$SSE" | python3 -c '
+import json, sys
+text = sys.stdin.read()
+for block in text.split("\n\n"):
+    ev, data = None, []
+    for line in block.splitlines():
+        if line.startswith("event:"):
+            ev = line[6:].strip()
+        elif line.startswith("data:"):
+            data.append(line[5:].strip())
+    if ev == "done" and data:
+        try:
+            print(json.loads("\n".join(data)).get("model", ""))
+        except ValueError:
+            pass
+        break
+')
+    case "$DONE_MODEL" in
+      *"$EXPECT_MODEL"*) check "done 帧 model=${DONE_MODEL}（真后端档位断言 含 ${EXPECT_MODEL}）" 0 ;;
+      *) check "done 帧 model=${DONE_MODEL:-<空>}（真后端档位断言 期望含 ${EXPECT_MODEL}）" 1 ;;
+    esac
+  else
+    printf '  [SKIP] 未设 SMOKE_EXPECT_MODEL，档位断言跳过（建议传 qwen2.5-7b 断言真 7B）\n'
+  fi
 
   say "11c. POST /v1/suggest 真模型（scene=voice_correct，语音纠错）"
   SSE=$(run curl -sN -X POST "$BASE_URL/v1/suggest" \

@@ -2,3 +2,7 @@
 *.gguf
 *.gguf.part
 *.bin
+# W13：llama.cpp 预编译二进制与原生服务运行时文件（不入库；run-llama-native.sh 自动探测）
+llama.cpp-b*/
+.llama-native.pid
+.llama-native.log

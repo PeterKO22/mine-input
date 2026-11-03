@@ -19,10 +19,14 @@ services:
       - "${HUB_PORT:-8088}:8080"
     environment:
       HUB_DATA_DIR: /data
-      # W10：/v1/suggest 真模型后端（llama.cpp llama-server，compose 内按服务名直连）
-      MODEL_URL: http://llama:8091
-      # 与 MODEL_FILE 同步（done 帧 model 字段诚实标注实际档位）；换 7B 时一并覆盖
-      MODEL_NAME: ${MODEL_NAME:-qwen2.5-0.5b-instruct-q4_k_m}
+      # W13：/v1/suggest 模型后端地址可切（两档）：
+      #   默认档 = 宿主机原生 7B（models/run-llama-native.sh start，宿主端口 8092；
+      #   Docker 内访问宿主机统一走 host.docker.internal）
+      #   降级档 = compose 内 0.5B（先 docker compose --profile model up -d llama，再：
+      #     MODEL_URL=http://llama:8091 MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m docker compose up -d hub）
+      MODEL_URL: ${MODEL_URL:-http://host.docker.internal:8092}
+      # 与实际档位同步（done 帧 model 字段诚实标注）；两档对应值见上
+      MODEL_NAME: ${MODEL_NAME:-qwen2.5-7b-instruct-q4_k_m}
       # 模型不可达时降级流式桩（done 帧 backend=stub-fallback，不冒充真模型）；置 0 关闭
       SUGGEST_ALLOW_STUB_FALLBACK: ${SUGGEST_ALLOW_STUB_FALLBACK:-1}
     volumes:
@@ -38,15 +42,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # ---- llama.cpp 模型服务（W10 启用：真后端供 /v1/suggest）--------------
-  # 档位已定：7B Q4（128GB 统一内存实测无压力，余量可上 14B 档）。
-  # 模型在 repo 根 models/（大文件不入库，models/fetch_model.sh 可复现拉取 + 校验），
-  # bind mount 进容器；换模型 drop-in：换 models/ 里的 GGUF 并改 -m 路径（见 README）。
+  # ---- llama.cpp 模型服务【0.5B 降级档】（W10 启用；W13 起为降级档）----------
+  # W13 起默认后端 = 宿主机原生 7B（models/run-llama-native.sh，宿主端口 8092，
+  # 宿主 128GB 统一内存跑 7B Q4_K_M 无压力）；本服务仅作容器内降级档
+  # （Docker VM 内存 7.75GB，只装得下 ≤500MB 的 0.5B；7B 在 VM 内 OOM，见 W10-REPORT §7）。
+  # 模型在 repo 根 models/（大文件不入库，models/fetch_model.sh 可复现拉取 + 校验）。
   #
-  # 启用（--profile model；端口 8091：本机 8088=Hub、8080/8000/8090 均被占用）：
-  #   ./models/fetch_model.sh                # 下载 + SHA256 校验（断点续传）
-  #   docker compose --profile model create && docker compose --profile model start
-  #   ./smoke.sh                             # 含真后端 case（smoke 11b–11d）
+  # 启用降级档（--profile model；端口 8091：本机 8088=Hub、8080/8000/8090 均被占用）：
+  #   ./models/fetch_model.sh install        # 模型灌入 hub-models 卷
+  #   docker compose --profile model up -d llama
+  #   MODEL_URL=http://llama:8091 MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m docker compose up -d hub
   llama:
     profiles: ["model"]        # 不加 --profile model 不会启动、不会拉镜像
     image: ghcr.io/ggml-org/llama.cpp:server

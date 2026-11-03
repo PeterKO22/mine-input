@@ -8,9 +8,11 @@
 ## 快速开始
 
 ```bash
-docker compose up -d --build     # 起 Hub（宿主机端口默认 8088，HUB_PORT 可覆盖）
-./smoke.sh                       # 全链路 curl 冒烟（默认 http://localhost:8088）
-docker compose down              # 停（数据在 hub-data 卷，不丢）
+./models/run-llama-native.sh start    # 起宿主机原生模型后端（默认 7B Q4_K_M，端口 8092）
+docker compose up -d --build          # 起 Hub（宿主机端口默认 8088，HUB_PORT 可覆盖）
+./smoke.sh                            # 全链路 curl 冒烟（默认 http://localhost:8088）
+docker compose down                   # 停（数据在 hub-data 卷，不丢）
+./models/run-llama-native.sh stop     # 停原生模型后端
 ```
 
 > 本机宿主 8080 已被其他服务占用，故默认端口 8088；`HUB_PORT=8080 docker compose up -d`
@@ -103,39 +105,53 @@ hub-models 卷 → /models   llama.cpp 模型占位卷（当前为空）
 - **静态加密**：预留位——当前 SQLite 明文落卷，上线前需卷级/库级加密；
 - **TLS**：预留位——当前 HTTP（内网默认形态），远程 Hub 形态前必须上 TLS，E2E 可选。
 
-## llama.cpp 模型服务（W10 启用）与模型灌入/换模型（drop-in）
+## 模型后端：两档切换（W13：宿主机原生 7B 默认档 + 容器内 0.5B 降级档）
 
-llama-server 走 compose `llama` 服务（`profiles:["model"]`，宿主端口 **8091**——避开
-8088/8080 及本机已占的 8000/8090），模型经命名卷 `hub-models` 挂 `/models`。
+`/v1/suggest` 的 llama.cpp 后端地址由 `MODEL_URL` 切换（Docker 内访问宿主机走
+`host.docker.internal`），`MODEL_NAME` 同步标注实际档位（done 帧 model 字段，诚实标注）：
 
-```bash
-# 1) 拉模型（断点续传 + SHA256 校验；源实测记录见 models/MODEL-SOURCE.md）
-./models/fetch_model.sh              # 目标档：Qwen2.5-7B-Instruct Q4_K_M（4.68GB）
-./models/fetch_model.sh fallback     # 降级档：Qwen2.5-0.5B-Instruct Q4_K_M（491MB）
-
-# 2) 灌入模型卷并起服务（本环境等价写法，用户侧可用 up -d）
-./models/fetch_model.sh install
-docker compose --profile model create && docker compose --profile model start
-
-# 3) 冒烟（含真后端 case 11b–11e）
-./smoke.sh
-```
-
-**换模型（drop-in，零代码改动）**：任意 GGUF 放进 `models/` → `./models/fetch_model.sh install`
-→ 换 `MODEL_FILE`（compose 里 llama 的 `-m`，split 分片喂第一片）与 `MODEL_NAME`（done 帧
-model 字段，诚实标注档位）→ recreate。`/v1/suggest` 只认 llama.cpp `/completion` 协议。
+| 档位 | 跑法 | 服务地址（Hub 侧 MODEL_URL） | MODEL_NAME | 端口 |
+|---|---|---|---|---|
+| **默认档 7B Q4_K_M**（宿主机原生，W13） | `./models/run-llama-native.sh start` | `http://host.docker.internal:8092` | `qwen2.5-7b-instruct-q4_k_m` | 宿主 8092 |
+| 降级档 0.5B Q4_K_M（compose 容器内，W10） | `docker compose --profile model up -d llama` | `http://llama:8091` | `qwen2.5-0.5b-instruct-q4_k_m` | 宿主 8091 |
 
 ```bash
-# 例：换上 7B Q4_K_M 目标档
-MODEL_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf \
-MODEL_NAME=qwen2.5-7b-instruct-q4_k_m \
-docker compose --profile model create && docker compose --profile model start
+# 1) 默认档：宿主机原生 7B（llama.cpp GitHub Releases 预编译 b12078，Metal；
+#    二进制在 models/llama.cpp-b12078/，脚本自动探测，也可 brew install llama.cpp）
+./models/run-llama-native.sh start     # start/stop/restart/status/health
+./models/run-llama-native.sh health    # 健康检查（curl :8092/health）
+
+# 2) Hub 用默认档（compose 默认值即原生 7B，无需传参）
+docker compose up -d --build           # 或已建容器：rm -sf + create + start 换 env
+
+# 3) 冒烟（含真后端 case 11b–11e + W13 真 7B 档位断言）
+SMOKE_EXPECT_MODEL=qwen2.5-7b ./smoke.sh
 ```
 
-> ⚠️ **本机 blocker（W10 实测）**：Docker Desktop VM 内存仅 7.75GB 且被约 20 个共驻容器
-> 占用 ~3.5GB，7B Q4_K_M（4.68GB 权重 + 运行时）装不下（OOMKilled 实证，见 W10-REPORT）。
-> 当前 compose 默认 **0.5B 降级档**跑通全链路；VM 内存调到 ≥8GB（建议 16GB）后按上面
-> 一行命令换上 7B。7B 权重已在 `models/` 就位（SHA256 已校验）。
+**换档到 0.5B 降级档**（原生 7B 不可用时；容器内 0.5B ≤500MB，Docker VM 内存装得下）：
+
+```bash
+./models/fetch_model.sh install        # 模型灌入 hub-models 卷（一次性）
+docker compose --profile model up -d llama
+MODEL_URL=http://llama:8091 MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m docker compose up -d
+SMOKE_EXPECT_MODEL=qwen2.5-0.5b MODEL_HEALTH_URL=http://localhost:8091/health ./smoke.sh
+```
+
+**换任意 GGUF（drop-in，零代码改动）**：放 `models/` → `./models/run-llama-native.sh restart`
+（或 `MODEL_FILE=<文件名> ./run-llama-native.sh start`）→ 同步 `MODEL_NAME`（done 帧诚实标注）
+→ recreate hub。`/v1/suggest` 只认 llama.cpp `/completion` 协议。
+
+```bash
+# 例：原生换上 0.5B 跑（对照档）
+MODEL_FILE=qwen2.5-0.5b-instruct-q4_k_m.gguf MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m \
+  ./models/run-llama-native.sh restart
+MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m docker compose up -d
+```
+
+> 📌 **W10 blocker 的 W13 解法**：7B Q4_K_M 在 Docker Desktop VM（7.75GB）内 OOM（W10-REPORT
+> §7 实证），故 W13 起模型服务改**宿主机原生**跑（128GB 统一内存 + Metal，实测 7B 无压力），
+> Hub 容器经 `host.docker.internal:8092` 访问；容器内 0.5B 保留为降级档。VM 内跑 7B 的
+> 原 blocker 依旧存在（VM 内存 ≥8GB 后也可走 compose llama + MODEL_FILE 一行换装）。
 
 ## 代码结构
 
@@ -148,9 +164,12 @@ hub/
   app/model_backend.py  llama.cpp 转发 + SSE 组帧 + 弃轮不扰服务端（W10）
   Dockerfile          python:3.12-slim + uvicorn
   docker-compose.yml   hub 服务 + SQLite 卷 + llama.cpp 模型服务（profile: model）
-  smoke.sh            全链路 curl 冒烟（含真模型 case 11b–11e）
+  smoke.sh            全链路 curl 冒烟（含真模型 case 11b–11e + W13 档位断言 SMOKE_EXPECT_MODEL）
   bench_latency.py    延迟实测（ttft/帧间隔/总耗时，markdown 表）
   W4-REPORT.md        车道报告（含 curl 实测输出）
   W10-REPORT.md       W10 真模型后端报告（延迟表 + blocker）
+  W13-REPORT.md       W13 宿主机原生 7B 报告（延迟表 7B vs 0.5B + 换档）
 models/               大模型文件（不入库；fetch_model.sh 可复现拉取/校验/灌入卷）
+  run-llama-native.sh 宿主机原生 llama.cpp 管理（start/stop/restart/status/health，默认 7B）
+  llama.cpp-b12078/   llama.cpp GitHub Releases 预编译（macOS arm64 + Metal，不入库）
 ```
