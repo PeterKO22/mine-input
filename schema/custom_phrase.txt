@@ -1,0 +1,11 @@
+# Rime 自定义短语（ping_wubi_mixed 配套）
+# encoding: utf-8
+#
+# 维护约定（NFR7：词库/短语全配置化热调，不重编译）：
+#   本文件独立维护；格式：文本<Tab>编码<Tab>权重
+#   - 编码 = 五笔86 编码（与 translator 主码表一致），可加后缀数字选重
+#   - 权重越大越靠前
+#   修改后执行：bash build/install-dev.sh 重新部署（或 Squirrel 菜单「重新部署」）
+#
+# 示例（默认注释掉，按需启用）：
+# 我的短语	wqvb	3

@@ -1,0 +1,128 @@
+# Rime schema
+# encoding: utf-8
+# ---------------------------------------------------------------------------
+# ping_wubi_mixed — W1 macos-core 混合输入 schema（mine-input）
+#
+# 结构（对应 docs/技术方案-v0.4.md §4 / FR1）：
+#   - 形码主 translator：五笔 86（rime-wubi，table_translator，默认 translator 命名空间）
+#   - 拼音并联 translator：袖珍简化字拼音（rime-pinyin-simp，script_translator@pinyin_simp）
+#   - 排序策略：
+#       形码优先   —— translator/initial_quality(2) > pinyin_simp/initial_quality(1)，
+#                     且 wubi86 码表 weight 为字频级大数（quality=exp(weight) 主导），
+#                     五笔命中时必排在拼音候选之前；
+#       拼音前移   —— 无五笔命中时拼音候选是唯一来源，自动占据候选栏最前；
+#       自定义短语 —— custom_phrase（独立文件 schema/custom_phrase.txt 维护，NFR7 热调）
+#   - 拼音反查   —— 敲 z 前缀 + 拼音，候选注释显示五笔编码
+#                   （reverse_lookup 默认 target=translator → 反查 translator/dictionary=wubi86）
+#
+# 上屏默认值（与 D 台账同源）：
+#   四码自动上屏 = 关（不设 speller/max_code_length）
+#   空码顶字     = 关（空码无候选，不将已有候选顶字上屏）
+#   候选数       = 8（menu/page_size，见 default.yaml）
+# ---------------------------------------------------------------------------
+
+schema:
+  schema_id: ping_wubi_mixed
+  name: "拼音五笔混合·dev"
+  version: "0.1"
+  author:
+    - mine-input W1
+  description: |
+    五笔86（rime-wubi）形码优先 + 袖珍简化字拼音（rime-pinyin-simp）并联补位。
+    无五笔命中时候选由拼音前移；z 前缀拼音反查五笔编码。
+  dependencies:
+    # 部署器只为 schema/translator/dictionary（及 schema/dependencies 各 schema 的
+    # translator/dictionary）编译码表；并联的 script_translator@pinyin_simp 所需的
+    # pinyin_simp 码表/prism 由此依赖 schema 触发编译（同上游 wubi86 的做法）。
+    - pinyin_simp
+
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: [ 中文, 西文 ]
+  - name: full_shape
+    states: [ 半角, 全角 ]
+  - name: extended_charset
+    states: [ 常用, 增廣 ]
+  - name: ascii_punct
+    states: [ 。，, ．， ]
+
+engine:
+  processors:
+    - ascii_composer
+    - recognizer
+    - key_binder
+    - speller
+    - punctuator
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - matcher
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - punct_translator
+    - table_translator@custom_phrase
+    - table_translator                # 形码主 translator：五笔86
+    - script_translator@pinyin_simp   # 拼音并联 translator
+    - reverse_lookup_translator       # 拼音反查（z 前缀，注释=五笔编码）
+  filters:
+    - uniquifier
+
+speller:
+  delimiter: " ;'"
+  # 四码自动上屏=关：不设 max_code_length
+
+translator:
+  dictionary: wubi86
+  enable_charset_filter: true
+  enable_sentence: true
+  enable_encoder: true
+  encode_commit_history: true
+  max_phrase_length: 4
+  initial_quality: 2
+  disable_user_dict_for_patterns:
+    - "^z.*$"
+
+pinyin_simp:
+  dictionary: pinyin_simp
+  enable_sentence: true
+  enable_user_dict: true
+  initial_quality: 1
+  preedit_format:
+    - xform/([nl])v/$1ü/
+    - xform/([nl])ue/$1üe/
+    - xform/([jqxy])v/$1u/
+
+custom_phrase:
+  dictionary: ""
+  user_dict: custom_phrase
+  db_class: stabledb
+  enable_completion: false
+  enable_sentence: false
+  initial_quality: 3
+
+reverse_lookup:
+  dictionary: pinyin_simp
+  prefix: "z"
+  suffix: "'"
+  tips: 〔反查〕
+  preedit_format:
+    - xform/([nl])v/$1ü/
+    - xform/([nl])ue/$1üe/
+    - xform/([jqxy])v/$1u/
+
+punctuator:
+  import_preset: symbols
+
+key_binder:
+  import_preset: default
+
+recognizer:
+  import_preset: default
+  patterns:
+    punct: '^/([0-9]0?|[A-Za-z]+)$'
+    reverse_lookup: "^z[a-z]*'?$"

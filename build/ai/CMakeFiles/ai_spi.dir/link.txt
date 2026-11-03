@@ -1,0 +1,2 @@
+/usr/bin/ar qc libai_spi.a CMakeFiles/ai_spi.dir/spi/timeout_assist.cc.o CMakeFiles/ai_spi.dir/backends/null/null_ai_assist.cc.o
+/usr/bin/ranlib libai_spi.a

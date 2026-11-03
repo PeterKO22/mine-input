@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/you/AITECreate/mine-input/build/cmake_install.cmake",
+		"/Users/you/AITECreate/mine-input/build/ai/cmake_install.cmake",
+		"/Users/you/AITECreate/mine-input/build/tests/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
