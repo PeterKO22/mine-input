@@ -1,0 +1,5 @@
+# 大模型不进 git（voice/models/ 解压后约 550MB）——获取方式见 W2-REPORT.md「模型清单」
+models/
+# Python venv 不进 git
+.venv/
+__pycache__/
