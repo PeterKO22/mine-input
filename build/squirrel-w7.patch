@@ -1,0 +1,266 @@
+--- a/sources/SquirrelInputController.swift
++++ b/sources/SquirrelInputController.swift
+@@ -27,6 +27,12 @@
+   private var chordTimer: Timer?
+   private var chordDuration: TimeInterval = 0
+   private var currentApp: String = ""
++  // ===== W7 macos 集成（build/squirrel-w7.patch）：候选重排挂点状态 =====
++  var w7Generation: Int = 0               // 候选轮次代数（异步 rescore 过期判定）
++  var w7DisplayToRime: [Int] = []         // 面板显示索引 → rime 当前页候选索引（智能组映射）
++  var w7RegularCandidates: [String] = []  // 常规组（librime 原序）
++  var w7RegularComments: [String] = []
++  var w7RegularLabels: [String] = []
+ 
+   // swiftlint:disable:next cyclomatic_complexity
+   override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
+@@ -50,6 +56,13 @@
+       updateAppOptions()
+     }
+ 
++    // W7: PTT 语音输入挂点（右⌘按住说话 / ⌃⌥M 兜底开关；录音中 Esc 取消）。
++    // 消费的事件不进 rime、不给客户端（flagsChanged 级监听，见 macos/w7/src/W7PttController.swift）。
++    if W7PttController.shared.intercept(event: event, last: lastModifiers, now: modifiers, controller: self) {
++      lastModifiers = modifiers
++      return true
++    }
++
+     switch event.type {
+     case .flagsChanged:
+       if lastModifiers == modifiers {
+@@ -124,7 +137,9 @@
+   }
+ 
+   func selectCandidate(_ index: Int) -> Bool {
+-    let success = rimeAPI.select_candidate_on_current_page(session, index)
++    // W7: 面板可能含智能组追加条目，点击索引映射回 rime 当前页候选索引
++    let rimeIndex = w7DisplayToRime.indices.contains(index) ? w7DisplayToRime[index] : index
++    let success = rimeAPI.select_candidate_on_current_page(session, rimeIndex)
+     if success {
+       rimeUpdate()
+     }
+@@ -550,7 +565,8 @@
+       let lastPage = ctx.menu.is_last_page
+ 
+       let selRange = NSRange(location: start.utf16Offset(in: preedit), length: preedit.utf16.distance(from: start, to: end))
+-      showPanel(preedit: inlinePreedit ? "" : preedit, selRange: selRange, caretPos: caretPos.utf16Offset(in: preedit),
++      // W7 (b): 常规组立即上屏 + 异步 rescore 挂点（800ms 弃本轮不阻塞上屏）
++      w7ShowWithRescore(preedit: inlinePreedit ? "" : preedit, selRange: selRange, caretPos: caretPos.utf16Offset(in: preedit),
+                 candidates: candidates, comments: comments, labels: labels, highlighted: Int(ctx.menu.highlighted_candidate_index),
+                 page: page, lastPage: lastPage)
+       _ = rimeAPI.free_context(&ctx)
+@@ -637,6 +653,96 @@
+       .init("SquirrelASCIIModeResponse.dev"),
+       object: status
+     )
++  }
++
++}
++
++// ===== W7 macos 集成（build/squirrel-w7.patch 注入；实现件见 macos/w7/）=====
++extension SquirrelInputController {
++  /// W7 (a): 语音转写结果上屏（PTT 松开 → voice/mic 管线 → commit）
++  func w7CommitVoiceText(_ text: String) {
++    commit(string: text)
++  }
++
++  /// W7 (a): 面板状态提示（低置信重说 / 取消 / 错误 / 识别中）
++  func w7ShowVoiceStatus(_ message: String) {
++    if let panel = NSApp.squirrelAppDelegate.panel {
++      panel.updateStatus(long: message, short: message)
++      panel.update(preedit: "", selRange: .empty, caretPos: 0,
++                   candidates: [], comments: [], labels: [],
++                   highlighted: -1, page: 0, lastPage: true, update: true)
++    }
++  }
++
++  /// W7 (a): 录音中提示（面板 preedit 行，不写客户端 marked text）
++  func w7ShowRecordingHint() {
++    showPanel(preedit: "🎙 正在聆听…（松开上屏 · Esc 取消）",
++              selRange: NSRange(location: 0, length: 0), caretPos: 0,
++              candidates: [], comments: [], labels: [],
++              highlighted: -1, page: 0, lastPage: true)
++  }
++
++  /// W7: 恢复面板为当前 rime 状态（录音结束后）
++  func w7RefreshPanel() {
++    rimeUpdate()
++  }
++
++  /// W7 (b): 候选链 AI 重排挂点——常规组立即上屏（不等 AI、不阻塞），
++  /// 异步 rescore（TimeoutAssist 800ms 弃本轮不阻塞上屏，审计每轮恰一条）；
++  /// 智能组到达后合并重绘。候选区两组可区分：常规组原标签（1..8）+
++  /// 智能组「智1..K」标签与 ⚡AI 评论（accent 高亮）。
++  func w7ShowWithRescore(preedit: String, selRange: NSRange, caretPos: Int,
++                         candidates: [String], comments: [String], labels: [String],
++                         highlighted: Int, page: Int, lastPage: Bool) {
++    w7Generation += 1
++    let gen = w7Generation
++    w7RegularCandidates = candidates
++    w7RegularComments = comments
++    w7RegularLabels = labels
++    w7DisplayToRime = Array(0..<candidates.count)
++    showPanel(preedit: preedit, selRange: selRange, caretPos: caretPos,
++              candidates: candidates, comments: comments, labels: labels,
++              highlighted: highlighted, page: page, lastPage: lastPage)
++    guard W7PttController.rescoreEnabled, !candidates.isEmpty else { return }
++    W7RescoreBridge.shared().rescore(withPreedit: preedit, textBefore: "",
++                                     candidates: candidates) { [weak self] status, smartOrder in
++      DispatchQueue.main.async {
++        self?.w7MergeSmart(status: status, smartOrder: smartOrder, generation: gen,
++                           preedit: preedit, selRange: selRange, caretPos: caretPos,
++                           highlighted: highlighted, page: page, lastPage: lastPage)
++      }
++    }
+   }
+ 
++  private func w7MergeSmart(status: W7RescoreStatus, smartOrder: [String], generation: Int,
++                            preedit: String, selRange: NSRange, caretPos: Int,
++                            highlighted: Int, page: Int, lastPage: Bool) {
++    guard generation == w7Generation else { return }  // 用户已继续打字：本轮过期，丢弃
++    guard status == .ok, !smartOrder.isEmpty else { return }  // 弃本轮/拒绝/错误：保持常规组
++    let regular = w7RegularCandidates
++    var firstIndex: [String: Int] = [:]
++    for (i, text) in regular.enumerated() where firstIndex[text] == nil {
++      firstIndex[text] = i
++    }
++    var texts = regular
++    var comments = w7RegularComments
++    var labels = w7RegularLabels
++    var displayToRime = Array(0..<regular.count)
++    var smartIndices = Set<Int>()
++    let topK = min(W7PttController.smartTopK, smartOrder.count)
++    for (k, text) in smartOrder.prefix(topK).enumerated() {
++      guard let rimeIndex = firstIndex[text] else { continue }  // C++ group() 已滤越界，双保险
++      texts.append(text)
++      comments.append("⚡AI")
++      labels.append("智\(k + 1)")
++      displayToRime.append(rimeIndex)
++      smartIndices.insert(texts.count - 1)
++    }
++    guard texts.count > regular.count else { return }
++    w7DisplayToRime = displayToRime
++    specialCommentIndices[.commentHighlight] = smartIndices  // 智能组评论 accent 高亮
++    showPanel(preedit: preedit, selRange: selRange, caretPos: caretPos,
++              candidates: texts, comments: comments, labels: labels,
++              highlighted: highlighted, page: page, lastPage: lastPage)
++  }
+ }
+--- a/sources/Squirrel-Bridging-Header.h
++++ b/sources/Squirrel-Bridging-Header.h
+@@ -5,3 +5,6 @@
+ 
+ #import <rime_api_stdbool.h>
+ #import <rime/key_table.h>
++
++// W7 macos 集成：rescore 挂点桥（macos/w7/src/W7RescoreBridge.h）
++#import "../../w7/src/W7RescoreBridge.h"
+--- a/resources/Info.plist
++++ b/resources/Info.plist
+@@ -113,5 +113,17 @@
+ 	<true/>
+ 	<key>SUEnableInstallerLauncherService</key>
+ 	<true/>
++	<key>W7VoiceEnabled</key>
++	<true/>
++	<key>W7RescoreEnabled</key>
++	<true/>
++	<key>W7VoicePython</key>
++	<string>~/AITECreate/mine-input/voice/.venv/bin/python</string>
++	<key>W7VoiceDaemon</key>
++	<string>~/AITECreate/mine-input/voice/mic/ptt_daemon.py</string>
++	<key>W7Hotwords</key>
++	<string>~/AITECreate/mine-input/voice/poc/hotwords.txt</string>
++	<key>W7SmartTopK</key>
++	<integer>3</integer>
+ </dict>
+ </plist>
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -95,6 +95,11 @@
+ 		D26434552706A15100857391 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D26434542706A15100857391 /* QuartzCore.framework */; };
+ 		E93074B70A5C264700470842 /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E93074B60A5C264700470842 /* InputMethodKit.framework */; };
+ 		F45E005F2B8CA81C00179B75 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F45E005E2B8CA81C00179B75 /* UserNotifications.framework */; };
++		FA70000000000000000000B1 /* W7PttController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A1 /* W7PttController.swift */; };
++		FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A2 /* W7RescoreBridge.mm */; };
++		FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A3 /* W7RescoreHook.cc */; };
++		FA70000000000000000000B4 /* timeout_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A4 /* timeout_assist.cc */; };
++		FA70000000000000000000B5 /* null_ai_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A5 /* null_ai_assist.cc */; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXCopyFilesBuildPhase section */
+@@ -308,6 +313,11 @@
+ 		D26434542706A15100857391 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+ 		E93074B60A5C264700470842 /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = /System/Library/Frameworks/InputMethodKit.framework; sourceTree = "<absolute>"; };
+ 		F45E005E2B8CA81C00179B75 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
++		FA70000000000000000000A1 /* W7PttController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7PttController.swift; path = ../w7/src/W7PttController.swift; sourceTree = "<group>"; };
++		FA70000000000000000000A2 /* W7RescoreBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = W7RescoreBridge.mm; path = ../w7/src/W7RescoreBridge.mm; sourceTree = "<group>"; };
++		FA70000000000000000000A3 /* W7RescoreHook.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = W7RescoreHook.cc; path = ../w7/W7RescoreHook.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A4 /* timeout_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = timeout_assist.cc; path = ../../ai/spi/timeout_assist.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A5 /* null_ai_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_ai_assist.cc; path = ../../ai/backends/null/null_ai_assist.cc; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -340,6 +350,11 @@
+ 				B35D2FE72BF00839009D156B /* BridgingFunctions.swift */,
+ 				B3A001012F260100009D156B /* ReservedProperty.swift */,
+ 				B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */,
++				FA70000000000000000000A1 /* W7PttController.swift */,
++				FA70000000000000000000A2 /* W7RescoreBridge.mm */,
++				FA70000000000000000000A3 /* W7RescoreHook.cc */,
++				FA70000000000000000000A4 /* timeout_assist.cc */,
++				FA70000000000000000000A5 /* null_ai_assist.cc */,
+ 			);
+ 			name = Sources;
+ 			sourceTree = "<group>";
+@@ -606,6 +621,11 @@
+ 				B39771272BED9B250093A49B /* SquirrelTheme.swift in Sources */,
+ 				B35D2FE82BF00839009D156B /* BridgingFunctions.swift in Sources */,
+ 				B3A001022F260100009D156B /* ReservedProperty.swift in Sources */,
++				FA70000000000000000000B1 /* W7PttController.swift in Sources */,
++				FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */,
++				FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */,
++				FA70000000000000000000B4 /* timeout_assist.cc in Sources */,
++				FA70000000000000000000B5 /* null_ai_assist.cc in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+@@ -617,6 +637,7 @@
+ 			buildSettings = {
+ 				ASSETCATALOG_COMPILER_APPICON_NAME = Rime;
+ 				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_FRAMEWORKS = AppKit;
++				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+ 				CLANG_CXX_LIBRARY = "libc++";
+ 				CLANG_ENABLE_MODULES = YES;
+ 				CLANG_ENABLE_OBJC_ARC = YES;
+@@ -674,6 +695,7 @@
+ 			buildSettings = {
+ 				ASSETCATALOG_COMPILER_APPICON_NAME = Rime;
+ 				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOL_FRAMEWORKS = AppKit;
++				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+ 				CLANG_CXX_LIBRARY = "libc++";
+ 				CLANG_ENABLE_MODULES = YES;
+ 				CLANG_ENABLE_OBJC_ARC = YES;
+@@ -761,9 +783,11 @@
+ 				HEADER_SEARCH_PATHS = (
+ 					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1)",
+ 					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2)",
++					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_3)",
+ 				);
+ 				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1 = "\"$(SRCROOT)/librime/src\"";
+ 				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2 = "\"$(SRCROOT)/librime/include\"";
++				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_3 = "\"$(SRCROOT)/../..\"";
+ 				LD_RUNPATH_SEARCH_PATHS = (
+ 					"@loader_path/../Frameworks",
+ 					"@loader_path/../Library/OpenSource",
+@@ -820,9 +844,11 @@
+ 				HEADER_SEARCH_PATHS = (
+ 					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1)",
+ 					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2)",
++					"$(HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_3)",
+ 				);
+ 				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_1 = "\"$(SRCROOT)/librime/src\"";
+ 				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_2 = "\"$(SRCROOT)/librime/include\"";
++				HEADER_SEARCH_PATHS_QUOTED_FOR_PROJECT_3 = "\"$(SRCROOT)/../..\"";
+ 				LD_RUNPATH_SEARCH_PATHS = (
+ 					"@loader_path/../Frameworks\n\n@loader_path/../Library/OpenSource\n\n@loader_path/../Library/Frameworks",
+ 					/usr/lib,

@@ -39,6 +39,19 @@ else
   echo "warning: squirrel-dev.patch 无法干净套用（树里已有手动改动？继续构建）" >&2
 fi
 
+# W7 macos 集成补丁（PTT 语音上屏 + 候选重排挂点，见 macos/W7-REPORT.md）：
+# 修改 SquirrelInputController.swift / Squirrel-Bridging-Header.h / Info.plist /
+# project.pbxproj；新源码直接从 ../w7/{src,.}/ 引用编译（macos/w7 为唯一事实源）。
+# 必须在 squirrel-dev.patch 之后套用（上下文含 dev 改动）；已应用则跳过。
+if git apply --check "$ROOT/build/squirrel-w7.patch" 2>/dev/null; then
+  git apply "$ROOT/build/squirrel-w7.patch"
+  echo "applied build/squirrel-w7.patch"
+elif git apply --reverse --check "$ROOT/build/squirrel-w7.patch" 2>/dev/null; then
+  echo "build/squirrel-w7.patch already applied"
+else
+  echo "warning: squirrel-w7.patch 无法干净套用（树里已有手动改动？继续构建）" >&2
+fi
+
 # make release 会依次：构建 librime（macos/squirrel/librime，pinned 子模块）→ 拉 plum 数据
 # → 拷 opencc 数据 → 构建 Sparkle.framework → xcodebuild Squirrel
 make release ARCHS='arm64'
