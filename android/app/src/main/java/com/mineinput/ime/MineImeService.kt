@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.inputmethodservice.InputMethodService
 import android.view.KeyEvent
 import android.view.View
+import com.mineinput.ime.engine.EngineCandidate
+import com.mineinput.ime.engine.MixedEngine
 import com.mineinput.ime.sync.SyncManager
 import com.mineinput.ime.voice.AsrEngine
 import com.mineinput.ime.voice.ModelManager
@@ -15,8 +17,9 @@ import org.json.JSONObject
 import kotlin.concurrent.thread
 
 /**
- * mine-input Android 基座 —— Kotlin IMS 骨架（W5）+ W11 集成 + W14 语音。
- * 已实现：QWERTY 输入 → 组合码（composing）→ 候选栏占位（五笔/拼音混合标签）→ 上屏；
+ * mine-input Android 基座 —— Kotlin IMS 骨架（W5）+ W11 集成 + W14 语音 + W16 混输引擎。
+ * 已实现：QWERTY 输入 → librime 混输引擎（W16，ping_wubi_mixed schema：五笔86 形码优先 +
+ * 拼音并联兜底 + z 反查注释）→ 候选栏真数据 → 选词经 W5 commit 通道上屏；
  * PTT 大键按住即说（W14 真管线：AudioRecord 16k mono 内存缓冲 → VAD 分段转写 →
  * 候选区滚动 → 松开经 W5 commit 通道上屏；滑出/返回取消；低置信提示重说不瞎猜）。
  *
@@ -25,7 +28,8 @@ import kotlin.concurrent.thread
  *   - 设置入口：状态条右侧「⚙ 设置」；
  *   - 真实上报：候选点选 → candidate_pick 事件、PTT 松开 → voice_session 事件
  *     （C0 同意 + 未熔断才入队上报，撤回同意后不再上报；静默入离线队列）。
- * 引擎接线点：[compose]（librime/自研混合引擎落点）。
+ * 引擎接线（W16，engine/MixedEngine）：onLetter/onKey/candidates/onCandidate 全部走
+ * MixedInputEngine（librime JNI）；首启 IO 线程部署 assets 下 rime 数据（设备端编译码表）。
  */
 class MineImeService : InputMethodService(), KeyboardView.Listener {
 
@@ -44,6 +48,11 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         active = this
+        // W16：IO 线程启动混输引擎（首用 fullCheck=设备端编译码表，W15 实测 ≤5s）
+        thread(name = "w16-engine-start") {
+            MixedEngine.ensureStarted(this) { android.util.Log.i(MixedEngine.TAG, it) }
+            if (::keyboardView.isInitialized) keyboardView.post { refresh("") }
+        }
     }
 
     override fun onDestroy() {
@@ -63,17 +72,26 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
         refresh("")
     }
 
-    // ---- 键盘事件 ----
+    // ---- 键盘事件（W16：全部走混输引擎；引擎未就绪时提示、不丢按键语义） ----
 
     override fun onLetter(ch: Char) {
-        composing.append(ch)
+        if (!engineReady()) return refresh("混输引擎部署中…（首用编译码表）")
+        val engine = MixedEngine.engine
+        engine.onLetter(ch)
+        val auto = engine.drainCommit() // 引擎自动上屏（如四码自动上屏，当前关=恒空）
+        if (auto.isNotEmpty()) commitText(auto)
+        syncComposing()
         currentInputConnection?.setComposingText(composing, 1)
         refresh("")
     }
 
     override fun onDelete() {
-        if (composing.isNotEmpty()) {
-            composing.deleteCharAt(composing.length - 1)
+        if (!engineReady()) return refresh("混输引擎部署中…（首用编译码表）")
+        val engine = MixedEngine.engine
+        if (engine.rawInput().isNotEmpty()) {
+            engine.onKey(com.mineinput.ime.engine.RimeMixedEngine.XK_BACKSPACE)
+            engine.drainCommit()
+            syncComposing()
             currentInputConnection?.setComposingText(composing, 1)
         } else {
             currentInputConnection?.deleteSurroundingText(1, 0)
@@ -82,8 +100,11 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onEnter() {
+        // W5 语义：回车=上屏原始码（不选候选）
         if (composing.isNotEmpty()) {
-            commit(composing.toString())
+            val raw = composing.toString()
+            if (engineReady()) MixedEngine.engine.clear()
+            commitText(raw)
         } else {
             currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
             currentInputConnection?.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
@@ -92,9 +113,13 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onSpace() {
-        if (composing.isNotEmpty() && candidates().isNotEmpty()) {
+        if (!engineReady()) return refresh("混输引擎部署中…（首用编译码表）")
+        val engine = MixedEngine.engine
+        val raw = engine.rawInput()
+        if (raw.isNotEmpty() && candidates().isNotEmpty()) {
             // 空码顶字=关（FR1 默认值）：空格不顶首选，仅上屏原始码
-            commit(composing.toString())
+            engine.clear()
+            commitText(raw)
         } else {
             currentInputConnection?.commitText(" ", 1)
         }
@@ -107,11 +132,16 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onCandidate(index: Int) {
-        val code = composing.toString()
-        val c = candidates().getOrNull(index) ?: return
-        commit(c)
+        if (!engineReady()) return
+        val engine = MixedEngine.engine
+        val code = engine.rawInput()
+        // W16：selectRimeCandidate + getRimeCommit（L1 词频/造词由 librime userdb 在此学习）
+        val text = engine.commit(index)
+        if (text.isEmpty()) return refresh("候选上屏失败", error = true)
+        commitText(text)
+        syncComposing()
         // W11 真实上报：candidate_pick 交互事件 + L1 词典/L2 计数学习（同意门控，静默）
-        learnAndReport(code, c)
+        learnAndReport(code, text)
         refresh("")
     }
 
@@ -215,9 +245,25 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
 
     // ---- 内部 ----
 
-    private fun commit(text: String) {
+    /** W5 commit 通道：上屏文本 + 清 composing。 */
+    private fun commitText(text: String) {
         currentInputConnection?.commitText(text, 1)
         composing.clear()
+    }
+
+    /** W16Debug 钩子用：经 W5 commit 通道上屏（无活动输入框返回 false）。 */
+    fun commitEngineText(text: String): Boolean {
+        val ic = currentInputConnection ?: return false
+        ic.commitText(text, 1)
+        return true
+    }
+
+    private fun engineReady(): Boolean = MixedEngine.engine.isStarted
+
+    /** composing 显示 = 引擎 rawInput（preedit）。 */
+    private fun syncComposing() {
+        composing.setLength(0)
+        if (engineReady()) composing.append(MixedEngine.engine.rawInput())
     }
 
     /** L1 词典 / L2 习惯计数 + 事件上报（全部受同意/熔断门控；撤回同意后不再上报）。 */
@@ -246,21 +292,17 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     /**
-     * 五笔/拼音混合候选 · 占位实现：
-     * 真实混合引擎（形码优先、拼音并联兜底，FR1）后续在 [compose] 落点接入；
-     * 此处对少量演示码返回示例候选，其余返回带「五笔/拼音」标签的占位候选，
-     * 以驱动候选栏交互（点选→上屏）联调。
+     * 候选栏真数据（W16）：librime ping_wubi_mixed 引擎候选 —— 五笔86 形码优先 +
+     * 拼音并联兜底（无五笔命中前移）+ z 反查注释（comment）。
+     * 展示映射：comment 非空 →「text · comment」（如 你 · wq wqiy）。
      */
     private fun candidates(): List<String> {
-        val code = composing.toString()
-        if (code.isEmpty()) return emptyList()
-        return when (code) {
-            "nh" -> listOf("你好·五笔", "拟好·拼音", "你号·拼音", "你好·混输")
-            "wubi" -> listOf("五笔·拼音", "五笔86·混输")
-            "py" -> listOf("拼音·混输", "拼音·五笔")
-            else -> listOf("$code·五笔", "$code·拼音", "$code·混输")
-        }
+        if (!engineReady()) return emptyList()
+        return MixedEngine.engine.candidates(0, 8).map { display(it) }
     }
+
+    private fun display(c: EngineCandidate): String =
+        if (c.comment.isNotBlank()) "${c.text} · ${c.comment}" else c.text
 
     private fun refresh(status: String, error: Boolean = false) {
         if (::keyboardView.isInitialized) {

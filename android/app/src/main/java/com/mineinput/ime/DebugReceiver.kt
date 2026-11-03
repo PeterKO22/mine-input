@@ -19,7 +19,9 @@ import org.json.JSONObject
  *   ingest                      → 模拟一条 candidate_pick 交互事件上报
  *   w14_*                       → W14 语音钩子（w14_status/w14_model/w14_asr/w14_ptt/w14_rec，
  *                                 见 voice/W14Debug.kt；结果打 tag=W14 供 w14-e2e 断言）
- * 所有结果打 logcat（tag=W11 / W14），供 w11-e2e.sh / w14-e2e 抓取断言。
+ *   w16_*                       → W16 混输引擎钩子（w16_startup/w16_status/w16_seq/w16_commit/
+ *                                 w16_learn/w16_bench，见 engine/W16Debug.kt；结果打 tag=W16 供 w16-e2e 断言）
+ * 所有结果打 logcat（tag=W11 / W14 / W16），供 w11-e2e.sh / w14-e2e / w16-e2e 抓取断言。
  */
 class DebugReceiver : BroadcastReceiver() {
 
@@ -32,6 +34,11 @@ class DebugReceiver : BroadcastReceiver() {
         if (cmd.startsWith("w14_")) {
             // W14 语音钩子（(d) 推 WAV → 转写/上屏确定性断言），实现见 voice/W14Debug.kt
             com.mineinput.ime.voice.W14Debug.handle(ctx, intent)
+            return
+        }
+        if (cmd.startsWith("w16_")) {
+            // W16 混输引擎钩子（键序列→候选/上屏/词频/延迟断言），实现见 engine/W16Debug.kt
+            com.mineinput.ime.engine.W16Debug.handle(ctx, intent)
             return
         }
         val pending = goAsync()

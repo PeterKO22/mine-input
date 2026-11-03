@@ -5,3 +5,6 @@ local.properties
 # W14：外部预编译产物（fetch-deps.sh 下载并 SHA256 校验；不进 git）
 app/libs/*.jar
 local-repo/**/*.aar
+
+# W16：外部预编译产物（fetch-rime-jni.sh 从 engine/poc/pathA 提取；GPL-3.0-or-later，不进 git）
+app/src/main/jniLibs/arm64-v8a/

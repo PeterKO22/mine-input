@@ -12,8 +12,8 @@ android {
         applicationId = "com.mineinput.ime"
         minSdk = 29
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0-w14"
+        versionCode = 4
+        versionName = "0.4.0-w16"
     }
 
     buildTypes {
@@ -26,7 +26,28 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // W16：RIME 数据（ping_wubi_mixed schema + wubi86/pinyin_simp 词库）随 app 部署。
+    // 构建期从 ../schema 同步到 build/generated/rimeAssets（单一事实源，避免仓内双份 3.4MB）。
+    // 注意（AGP 9）：SourceSet API 不收 Provider，须传静态路径；任务依赖由下方 preBuild 显式携带。
+    sourceSets {
+        getByName("main") {
+            assets.srcDir("build/generated/rimeAssets")
+        }
+    }
 }
+
+// W16：assets/rime/{shared,user} ← schema/（default + schema + deps 词库 → shared；custom_phrase → user）
+val syncRimeAssets = tasks.register<Copy>("syncRimeAssets") {
+    from("${rootDir}/../schema") {
+        include("default.yaml", "ping_wubi_mixed.schema.yaml")
+        into("rime/shared")
+    }
+    from("${rootDir}/../schema/deps") { into("rime/shared") }
+    from("${rootDir}/../schema/custom_phrase.txt") { into("rime/user") }
+    into(layout.buildDirectory.dir("generated/rimeAssets"))
+}
+tasks.named("preBuild") { dependsOn(syncRimeAssets) }
 
 dependencies {
     // W14：sherpa-onnx v2.0.1 Android 预编译（GitHub Releases AAR，本地 Maven 仓库；
