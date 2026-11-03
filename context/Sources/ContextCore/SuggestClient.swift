@@ -153,10 +153,10 @@ public struct HubSuggestBackend: SuggestBackend {
                                 finished: finished, onUpdate: onUpdate)
                         }
                         eventName = String(line.dropFirst(6))
-                            .trimmingCharacters(in: .whitespaces)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
                     } else if line.hasPrefix("data:") {
                         dataLines.append(
-                            String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+                            String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines))
                     }
                 }
                 await Self.dispatch(
@@ -187,7 +187,8 @@ public struct HubSuggestBackend: SuggestBackend {
         return String(s.prefix(200))
     }
 
-    /// SSE 帧分发：`event: suggestion` → kDelta；`event: done` → kDone（恰好一次终止）。
+    /// SSE 帧分发：`event: suggestion` → kDelta；`event: done` → kDone（恰好一次终止）；
+    /// `event: error`（Hub 模型后端异常帧）→ kError（诚实上报，不吞）。
     private static func dispatch(
         event: String, data: String,
         finished: FinishedFlag, onUpdate: @escaping (SuggestUpdate) -> Void
@@ -200,6 +201,10 @@ public struct HubSuggestBackend: SuggestBackend {
                 SuggestUpdate(status: .kDelta, candidates: [cand]), onUpdate: onUpdate)
         } else if event == "done" {
             await finished.terminateIfPending(SuggestUpdate(status: .kDone), onUpdate: onUpdate)
+        } else if event == "error" {
+            // Hub /v1/suggest 的 SSE 错误帧（如模型后端 503）：终止本轮并如实上报。
+            await finished.terminateIfPending(
+                SuggestUpdate(status: .kError, error: String(data.prefix(200))), onUpdate: onUpdate)
         }
     }
 }

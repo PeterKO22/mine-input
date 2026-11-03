@@ -1,0 +1,199 @@
+# W12 macos-C1 集成补丁（可复现记录；前置 build/squirrel-dev.patch + build/squirrel-w7.patch）
+#
+# 修改 Squirrel 既有 3 文件：
+#   - sources/SquirrelInputController.swift：⌥Esc 拦截 / W7×W9 事件上报挂点
+#     （commit=key_session、selectCandidate=candidate_pick、w7CommitVoiceText=voice_session、
+#       w7ShowRecordingHint/w7ShowVoiceStatus=PTT 触发窗）
+#   - resources/Info.plist：W12 隐私设置键（W12C1Enabled 默认 false——C1 显式开关）
+#   - Squirrel.xcodeproj/project.pbxproj：编入 ../w12/src/*.swift +
+#     ../../context/Sources/ContextCore/*.swift（FA71/FA72 id）
+#
+# 应用方式：在已套用 dev+w7 补丁的 macos/squirrel 上
+#   git apply macos/w12/squirrel-w12.patch
+# （macos/w12/src 与 context/Sources/ContextCore 为新增源码唯一事实源，pbxproj 直接引用。）
+--- a/sources/SquirrelInputController.swift
++++ b/sources/SquirrelInputController.swift
+@@ -59,6 +59,13 @@
+     // W7: PTT 语音输入挂点（右⌘按住说话 / ⌃⌥M 兜底开关；录音中 Esc 取消）。
+     // 消费的事件不进 rime、不给客户端（flagsChanged 级监听，见 macos/w7/src/W7PttController.swift）。
+     if W7PttController.shared.intercept(event: event, last: lastModifiers, now: modifiers, controller: self) {
++      lastModifiers = modifiers
++      return true
++    }
++
++    // W12: ⌥Esc 提词浮层唤起 / 浮层按键采纳（Tab/数字/Esc）/ C1 输入触发窗
++    //（macos/w12/src/W12SquirrelGlue.swift；消费的事件不进 rime、不给客户端）。
++    if W12SquirrelHooks.shared.intercept(event: event, controller: self, preedit: preedit, appId: currentApp) {
+       lastModifiers = modifiers
+       return true
+     }
+@@ -141,6 +148,10 @@
+     let rimeIndex = w7DisplayToRime.indices.contains(index) ? w7DisplayToRime[index] : index
+     let success = rimeAPI.select_candidate_on_current_page(session, rimeIndex)
+     if success {
++      // W12: 候选选择事件上报（W7×W9 接线 → InteractionStore）
++      let pickedIndex = w7DisplayToRime.indices.contains(index) ? w7DisplayToRime[index] : index
++      let pickedText = w7RegularCandidates.indices.contains(pickedIndex) ? w7RegularCandidates[pickedIndex] : ""
++      W12SquirrelHooks.shared.noteCandidatePick(textIn: preedit, textOut: pickedText, appId: currentApp)
+       rimeUpdate()
+     }
+     return success
+@@ -578,6 +589,9 @@
+   func commit(string: String) {
+     guard let client = client else { return }
+ 
++    // W12: 输入会话事件上报（W7×W9 接线 → InteractionStore；语音上屏已报 voice_session 时跳过）
++    W12SquirrelHooks.shared.noteCommit(textIn: preedit, textOut: string, appId: currentApp)
++
+     let forceMarkedText =
+       session != 0 &&
+       rimeAPI.get_option(session, "force_marked_text_for_direct_commit")
+@@ -661,11 +675,16 @@
+ extension SquirrelInputController {
+   /// W7 (a): 语音转写结果上屏（PTT 松开 → voice/mic 管线 → commit）
+   func w7CommitVoiceText(_ text: String) {
++    // W12: 语音会话事件上报 + C1 asr_digest 摘要（W7×W9 接线；commit 的 key_session 由
++    // noteVoiceCommit 抑制，避免同一上屏双报）
++    W12SquirrelHooks.shared.noteVoiceCommit(text: text, appId: currentApp)
+     commit(string: text)
+   }
+ 
+   /// W7 (a): 面板状态提示（低置信重说 / 取消 / 错误 / 识别中）
+   func w7ShowVoiceStatus(_ message: String) {
++    // W12: PTT 语音窗结束（C1 仅输入时触发窗收口）
++    W12SquirrelHooks.shared.notePttEnd()
+     if let panel = NSApp.squirrelAppDelegate.panel {
+       panel.updateStatus(long: message, short: message)
+       panel.update(preedit: "", selRange: .empty, caretPos: 0,
+@@ -676,6 +695,8 @@
+ 
+   /// W7 (a): 录音中提示（面板 preedit 行，不写客户端 marked text）
+   func w7ShowRecordingHint() {
++    // W12: PTT 语音窗开始（C1 仅输入时触发窗：PTT 期间可采集）
++    W12SquirrelHooks.shared.notePttStart()
+     showPanel(preedit: "🎙 正在聆听…（松开上屏 · Esc 取消）",
+               selRange: NSRange(location: 0, length: 0), caretPos: 0,
+               candidates: [], comments: [], labels: [],
+@@ -687,6 +708,12 @@
+     rimeUpdate()
+   }
+ 
++  /// W12: 提词浮层采纳文本上屏（commit(string:) 为 fileprivate，本文件内转发；
++  /// 采纳前绝不 commit——只建议不上屏由浮层语义保证）
++  func w12CommitAdopted(_ text: String) {
++    commit(string: text)
++  }
++
+   /// W7 (b): 候选链 AI 重排挂点——常规组立即上屏（不等 AI、不阻塞），
+   /// 异步 rescore（TimeoutAssist 800ms 弃本轮不阻塞上屏，审计每轮恰一条）；
+   /// 智能组到达后合并重绘。候选区两组可区分：常规组原标签（1..8）+
+--- a/resources/Info.plist
++++ b/resources/Info.plist
+@@ -125,5 +125,17 @@
+ 	<string>~/AITECreate/mine-input/voice/poc/hotwords.txt</string>
+ 	<key>W7SmartTopK</key>
+ 	<integer>3</integer>
++	<key>W12C1Enabled</key>
++	<false/>
++	<key>W12C1Screen</key>
++	<true/>
++	<key>W12C1Audio</key>
++	<true/>
++	<key>W12PrompterEnabled</key>
++	<true/>
++	<key>W12PrompterBackend</key>
++	<string>null</string>
++	<key>W12HubURL</key>
++	<string>http://localhost:8088</string>
+ </dict>
+ </plist>
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -100,6 +100,21 @@
+ 		FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A3 /* W7RescoreHook.cc */; };
+ 		FA70000000000000000000B4 /* timeout_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A4 /* timeout_assist.cc */; };
+ 		FA70000000000000000000B5 /* null_ai_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A5 /* null_ai_assist.cc */; };
++		FA7200000000000000000001 /* W12Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* W12Digest.swift */; };
++		FA7200000000000000000002 /* W12Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* W12Config.swift */; };
++		FA7200000000000000000003 /* W12OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000003 /* W12OCR.swift */; };
++		FA7200000000000000000004 /* W12ScreenCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000004 /* W12ScreenCapture.swift */; };
++		FA7200000000000000000005 /* W12AsrClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000005 /* W12AsrClient.swift */; };
++		FA7200000000000000000006 /* W12EventBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000006 /* W12EventBridge.swift */; };
++		FA7200000000000000000007 /* W12C1Collector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000007 /* W12C1Collector.swift */; };
++		FA7200000000000000000008 /* W12PrompterModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000008 /* W12PrompterModel.swift */; };
++		FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000009 /* W12PrompterOverlay.swift */; };
++		FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000A /* W12SquirrelGlue.swift */; };
++		FA720000000000000000000B /* InteractionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000B /* InteractionEvent.swift */; };
++		FA720000000000000000000C /* InteractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000C /* InteractionStore.swift */; };
++		FA720000000000000000000D /* CircuitBreaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000D /* CircuitBreaker.swift */; };
++		FA720000000000000000000E /* C0Collector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000E /* C0Collector.swift */; };
++		FA720000000000000000000F /* SuggestClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000F /* SuggestClient.swift */; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXCopyFilesBuildPhase section */
+@@ -318,6 +333,21 @@
+ 		FA70000000000000000000A3 /* W7RescoreHook.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = W7RescoreHook.cc; path = ../w7/W7RescoreHook.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A4 /* timeout_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = timeout_assist.cc; path = ../../ai/spi/timeout_assist.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A5 /* null_ai_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_ai_assist.cc; path = ../../ai/backends/null/null_ai_assist.cc; sourceTree = "<group>"; };
++		FA7100000000000000000001 /* W12Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Digest.swift; path = ../w12/src/W12Digest.swift; sourceTree = "<group>"; };
++		FA7100000000000000000002 /* W12Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Config.swift; path = ../w12/src/W12Config.swift; sourceTree = "<group>"; };
++		FA7100000000000000000003 /* W12OCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12OCR.swift; path = ../w12/src/W12OCR.swift; sourceTree = "<group>"; };
++		FA7100000000000000000004 /* W12ScreenCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12ScreenCapture.swift; path = ../w12/src/W12ScreenCapture.swift; sourceTree = "<group>"; };
++		FA7100000000000000000005 /* W12AsrClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12AsrClient.swift; path = ../w12/src/W12AsrClient.swift; sourceTree = "<group>"; };
++		FA7100000000000000000006 /* W12EventBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12EventBridge.swift; path = ../w12/src/W12EventBridge.swift; sourceTree = "<group>"; };
++		FA7100000000000000000007 /* W12C1Collector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12C1Collector.swift; path = ../w12/src/W12C1Collector.swift; sourceTree = "<group>"; };
++		FA7100000000000000000008 /* W12PrompterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterModel.swift; path = ../w12/src/W12PrompterModel.swift; sourceTree = "<group>"; };
++		FA7100000000000000000009 /* W12PrompterOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterOverlay.swift; path = ../w12/src/W12PrompterOverlay.swift; sourceTree = "<group>"; };
++		FA710000000000000000000A /* W12SquirrelGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12SquirrelGlue.swift; path = ../w12/src/W12SquirrelGlue.swift; sourceTree = "<group>"; };
++		FA710000000000000000000B /* InteractionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionEvent.swift; path = ../../context/Sources/ContextCore/InteractionEvent.swift; sourceTree = "<group>"; };
++		FA710000000000000000000C /* InteractionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionStore.swift; path = ../../context/Sources/ContextCore/InteractionStore.swift; sourceTree = "<group>"; };
++		FA710000000000000000000D /* CircuitBreaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CircuitBreaker.swift; path = ../../context/Sources/ContextCore/CircuitBreaker.swift; sourceTree = "<group>"; };
++		FA710000000000000000000E /* C0Collector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = C0Collector.swift; path = ../../context/Sources/ContextCore/C0Collector.swift; sourceTree = "<group>"; };
++		FA710000000000000000000F /* SuggestClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SuggestClient.swift; path = ../../context/Sources/ContextCore/SuggestClient.swift; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -355,6 +385,21 @@
+ 				FA70000000000000000000A3 /* W7RescoreHook.cc */,
+ 				FA70000000000000000000A4 /* timeout_assist.cc */,
+ 				FA70000000000000000000A5 /* null_ai_assist.cc */,
++				FA7100000000000000000001 /* W12Digest.swift */,
++				FA7100000000000000000002 /* W12Config.swift */,
++				FA7100000000000000000003 /* W12OCR.swift */,
++				FA7100000000000000000004 /* W12ScreenCapture.swift */,
++				FA7100000000000000000005 /* W12AsrClient.swift */,
++				FA7100000000000000000006 /* W12EventBridge.swift */,
++				FA7100000000000000000007 /* W12C1Collector.swift */,
++				FA7100000000000000000008 /* W12PrompterModel.swift */,
++				FA7100000000000000000009 /* W12PrompterOverlay.swift */,
++				FA710000000000000000000A /* W12SquirrelGlue.swift */,
++				FA710000000000000000000B /* InteractionEvent.swift */,
++				FA710000000000000000000C /* InteractionStore.swift */,
++				FA710000000000000000000D /* CircuitBreaker.swift */,
++				FA710000000000000000000E /* C0Collector.swift */,
++				FA710000000000000000000F /* SuggestClient.swift */,
+ 			);
+ 			name = Sources;
+ 			sourceTree = "<group>";
+@@ -626,6 +671,21 @@
+ 				FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */,
+ 				FA70000000000000000000B4 /* timeout_assist.cc in Sources */,
+ 				FA70000000000000000000B5 /* null_ai_assist.cc in Sources */,
++				FA7200000000000000000001 /* W12Digest.swift in Sources */,
++				FA7200000000000000000002 /* W12Config.swift in Sources */,
++				FA7200000000000000000003 /* W12OCR.swift in Sources */,
++				FA7200000000000000000004 /* W12ScreenCapture.swift in Sources */,
++				FA7200000000000000000005 /* W12AsrClient.swift in Sources */,
++				FA7200000000000000000006 /* W12EventBridge.swift in Sources */,
++				FA7200000000000000000007 /* W12C1Collector.swift in Sources */,
++				FA7200000000000000000008 /* W12PrompterModel.swift in Sources */,
++				FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */,
++				FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */,
++				FA720000000000000000000B /* InteractionEvent.swift in Sources */,
++				FA720000000000000000000C /* InteractionStore.swift in Sources */,
++				FA720000000000000000000D /* CircuitBreaker.swift in Sources */,
++				FA720000000000000000000E /* C0Collector.swift in Sources */,
++				FA720000000000000000000F /* SuggestClient.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};

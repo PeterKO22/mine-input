@@ -139,6 +139,23 @@ public final class C0Collector {
             appId: appId, secureInput: false)
     }
 
+    /// C1 上下文样本入库（W12 扩展，kind=key_session（OCR）/ voice_session（ASR））：
+    /// **只落 ocr_digest/asr_digest（摘要+长度），绝不落原图/OCR 全文/ASR 全文**。
+    /// 门禁与其余 record* 一致：熔断立即停、安全输入自动停、黑名单拒收。
+    @discardableResult
+    public func recordC1Sample(
+        kind: EventKind,
+        ocrDigest: String? = nil,
+        asrDigest: String? = nil,
+        appId: String? = nil,
+        secureInput: Bool = false
+    ) -> InteractionStore.InsertResult {
+        submit(
+            kind: kind, textIn: "", textOut: "",
+            ocrDigest: ocrDigest, asrDigest: asrDigest,
+            appId: appId, secureInput: secureInput)
+    }
+
     // ------------------------------------------------------------ 剪贴板（默认关）
 
     /// 显式开启剪贴板采集（隐私红线：必须显式确认，默认关）。

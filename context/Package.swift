@@ -6,6 +6,11 @@ import PackageDescription
 let package = Package(
     name: "context",
     platforms: [.macOS(.v13)],
+    products: [
+        // W12（macos/w12）以包依赖方式复用核心（additive，不影响既有测试）
+        .library(name: "ContextCore", targets: ["ContextCore"]),
+        .executable(name: "contextctl", targets: ["contextctl"]),
+    ],
     targets: [
         .target(
             name: "ContextCore",

@@ -70,3 +70,12 @@ FR5 三唤起的触发点与本模块的对应关系：
 5. **敏感应用黑名单**命中即拒收；
 6. **一键熔断**：`breaker trip` 后一切入库立即被拒（日志保留不新增），状态可查；
 7. **可查可导可一键清空** + 30 天滚动（`log prune`）。
+
+## W12 扩展（macos/w12，C1 采集）
+
+W12（macos/w12/src/W12C1Collector.swift）在 C0 之上接通 C1：屏幕快照→Vision OCR→`ocr_digest`、
+音频→W2 管线→`asr_digest`（**仅摘要/长度**，`sha256:… len:… lines:…`，绝不落原文/原图），
+仅输入时触发（PTT 期间 + 按键触发窗）+ 防抖 2s；C1 默认关（`W12Privacy.enableC1(explicitConfirm:)`
+显式开启，与本模块剪贴板开关同构）；密码框（`IsSecureEventInputEnabled`）自动停不可关；
+黑名单跳过、熔断立即停沿用本模块既有门禁。`C0Collector.recordC1Sample(kind:ocrDigest:asrDigest:)`
+为新增入库 API（additive）。⌥Esc 提词浮层（NSPanel）已由 W12 在 Squirrel 侧落地（见 macos/W12-REPORT.md）。
