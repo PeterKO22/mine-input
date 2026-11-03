@@ -1,0 +1,6 @@
+foreach(t test_null_backend test_timeout test_stream)
+  add_executable(${t} ${t}.cpp)
+  target_link_libraries(${t} PRIVATE ai_spi)
+  add_test(NAME ${t} COMMAND ${t})
+  set_tests_properties(${t} PROPERTIES TIMEOUT 60)
+endforeach()
