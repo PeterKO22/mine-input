@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- W14: sherpa-onnx v2.0.1 Android AAR（GitHub Releases 预编译，SHA256 见 fetch-deps.sh）
+     本地 Maven 仓库布局：AGP 8+ 不支持直接 .aar 文件依赖，走 local-repo 最干净。
+     无远程依赖（kotlin-stdlib 由 AGP 内置 Kotlin 提供）。 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.k2fsa.sherpa</groupId>
+  <artifactId>sherpa-onnx</artifactId>
+  <version>2.0.1</version>
+  <packaging>aar</packaging>
+  <description>sherpa-onnx v2.0.1 Android prebuilt (GitHub Release asset)</description>
+</project>

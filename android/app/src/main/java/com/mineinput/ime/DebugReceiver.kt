@@ -17,7 +17,9 @@ import org.json.JSONObject
  *   seed                        → 写入演示学习数据（userdb/counters/hotword）
  *   sync                        → 立即同步（W11: ROUNDTRIP_OK/FAIL ...）
  *   ingest                      → 模拟一条 candidate_pick 交互事件上报
- * 所有结果打 logcat（tag=W11），供 w11-e2e.sh 抓取断言。
+ *   w14_*                       → W14 语音钩子（w14_status/w14_model/w14_asr/w14_ptt/w14_rec，
+ *                                 见 voice/W14Debug.kt；结果打 tag=W14 供 w14-e2e 断言）
+ * 所有结果打 logcat（tag=W11 / W14），供 w11-e2e.sh / w14-e2e 抓取断言。
  */
 class DebugReceiver : BroadcastReceiver() {
 
@@ -27,6 +29,11 @@ class DebugReceiver : BroadcastReceiver() {
         }
         SyncManager.init(ctx)
         val cmd = intent.getStringExtra("cmd") ?: ""
+        if (cmd.startsWith("w14_")) {
+            // W14 语音钩子（(d) 推 WAV → 转写/上屏确定性断言），实现见 voice/W14Debug.kt
+            com.mineinput.ime.voice.W14Debug.handle(ctx, intent)
+            return
+        }
         val pending = goAsync()
         Thread {
             try {

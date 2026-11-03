@@ -27,6 +27,7 @@ class KeyboardView constructor(
         fun onCandidate(index: Int)
         fun onPttDown()
         fun onPttUp()
+        fun onPttCancel() // W14：滑出 PTT 键 / 返回键取消（不上屏）
         fun onSettings() // W11：状态条「⚙ 设置」入口
     }
 
@@ -73,6 +74,10 @@ class KeyboardView constructor(
     private var gearRect: RectF = RectF() // W11 设置入口命中区
     private var pressed: KeyRect? = null
     private var pttHeld = false
+    private var pttOverlayActive = false // W14：听写中 → 候选区显示滚动转写
+    private var pttRolling = ""
+    private var pttCancelArmed = false // W14：滑出 PTT 键 = 松开取消
+    private var statusError = false // W14：失败提示（红字）
 
     private val density = resources.displayMetrics.density
     private fun dp(v: Float): Float = v * density
@@ -98,12 +103,26 @@ class KeyboardView constructor(
         typeface = Typeface.MONOSPACE   // 数字一律 mono
     }
 
-    fun updateState(composing: String, candidates: List<String>, statusLine: String, bits: List<Bit> = emptyList()) {
+    fun updateState(
+        composing: String,
+        candidates: List<String>,
+        statusLine: String,
+        bits: List<Bit> = emptyList(),
+        error: Boolean = false, // W14：失败提示（如「请重说」）红字显示
+    ) {
         this.composing = composing
         this.candidates = candidates
         this.statusLine = statusLine
         this.stateBits = bits
+        this.statusError = error
         if (width > 0) layoutKeys(width) // 候选数量变化 → 重排候选栏命中区
+        invalidate()
+    }
+
+    /** W14：PTT 候选区滚动转写覆盖层（听写中候选栏显示实时转写，随说话滚动刷新）。 */
+    fun setPttOverlay(active: Boolean, rolling: String) {
+        pttOverlayActive = active
+        pttRolling = rolling
         invalidate()
     }
 
@@ -151,6 +170,29 @@ class KeyboardView constructor(
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(DesignTokens.bg)
 
+        if (pttOverlayActive) {
+            // W14：听写中 → 候选区显示滚动转写（尾部跟随，实时刷新；提交后回到候选栏）
+            val strip = RectF(keyMargin, keyGap, width - keyMargin, keyGap + candidateHeight)
+            paintFill.color = DesignTokens.card
+            paintFill.setShadowLayer(dp(6f), 0f, 0f, DesignTokens.cyan)
+            canvas.drawRoundRect(strip, radius, radius, paintFill)
+            paintFill.setShadowLayer(0f, 0f, 0f, 0)
+            paintStroke.color = DesignTokens.cyan
+            canvas.drawRoundRect(strip, radius, radius, paintStroke)
+            paintText.color = DesignTokens.textBody
+            paintText.textSize = dp(13f)
+            paintText.textAlign = Paint.Align.LEFT
+            val maxW = strip.width() - dp(16f)
+            var show = pttRolling
+            if (paintText.measureText(show) > maxW) {
+                // 尾部跟随（滚动）：保留能放下的尾段
+                while (show.isNotEmpty() && paintText.measureText(show) > maxW) show = show.substring(1)
+                show = "…$show"
+            }
+            val cy = strip.centerY() - (paintText.descent() + paintText.ascent()) / 2
+            canvas.drawText(show, strip.left + dp(8f), cy, paintText)
+            paintText.textAlign = Paint.Align.CENTER
+        } else {
         // 候选栏（M1 映射：序号 gold mono，当前候选金填充微光）
         for ((i, rect) in candidateRects.withIndex()) {
             val label = candidates.getOrNull(i) ?: continue
@@ -170,10 +212,15 @@ class KeyboardView constructor(
             paintText.textSize = dp(13f)
             canvas.drawText(label, (rect.left + rect.right) / 2 + dp(8f), cy, paintText)
         }
+        }
 
-        // 状态行（听写中 = cyan；其余弱化）
+        // 状态行（听写中 = cyan；失败提示 = red；其余弱化）
         val statusY = keyGap + candidateHeight + statusHeight / 2
-        paintTextMono.color = if (pttHeld) DesignTokens.cyan else DesignTokens.textMuted
+        paintTextMono.color = when {
+            pttHeld -> DesignTokens.cyan
+            statusError -> DesignTokens.red
+            else -> DesignTokens.textMuted
+        }
         paintTextMono.textSize = dp(11f)
         val statusText = if (composing.isNotEmpty() && statusLine.isEmpty()) "码：$composing" else statusLine
         canvas.drawText(
@@ -219,6 +266,7 @@ class KeyboardView constructor(
         val isPressed = pressed === kr
         val isPtt = kr.def.kind == Kind.PTT
         paintFill.color = when {
+            isPtt && pttHeld && pttCancelArmed -> DesignTokens.red // W14：滑出取消态
             isPtt && pttHeld -> DesignTokens.cyan   // PTT 长按态青光
             isPtt -> DesignTokens.gold              // PTT 主按钮金实心
             isPressed -> DesignTokens.stroke
@@ -233,6 +281,9 @@ class KeyboardView constructor(
         canvas.drawRoundRect(kr.rect, radius, radius, paintStroke)
 
         var label = kr.def.label
+        if (kr.def.kind == Kind.PTT && pttHeld) {
+            label = if (pttCancelArmed) "松开取消" else "松开上屏" // W14
+        }
         if (kr.def.kind == Kind.CHAR && shiftOn) label = label.uppercase()
         paintText.color = when {
             isPtt && pttHeld -> DesignTokens.bg
@@ -270,6 +321,21 @@ class KeyboardView constructor(
             MotionEvent.ACTION_UP -> {
                 val kr = pressed
                 pressed = null
+                if (kr != null && kr.def.kind == Kind.PTT && pttHeld) {
+                    // W14：PTT 松开语义——键内松开=上屏；滑出键外（或已触发取消）=取消
+                    val inside = kr.rect.contains(event.x, event.y)
+                    val cancelled = pttCancelArmed || !inside
+                    pttHeld = false
+                    pttCancelArmed = false
+                    if (cancelled) {
+                        android.util.Log.i("W14", "PTT_CANCEL_REASON slide-out")
+                        listener?.onPttCancel()
+                    } else {
+                        listener?.onPttUp()
+                    }
+                    invalidate()
+                    return true
+                }
                 if (kr != null && kr.rect.contains(event.x, event.y)) {
                     when (kr.def.kind) {
                         Kind.CHAR -> {
@@ -288,17 +354,28 @@ class KeyboardView constructor(
                         Kind.PTT -> {}
                     }
                 }
-                if (kr?.def?.kind == Kind.PTT || pttHeld) {
-                    pttHeld = false
-                    listener?.onPttUp()
-                }
                 invalidate()
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                // W14：PTT 滑出取消手势（滑出键外=松开取消；滑回=恢复上屏）
+                val kr = pressed
+                if (pttHeld && kr != null && kr.def.kind == Kind.PTT) {
+                    val slop = dp(12f)
+                    val outside = event.x < kr.rect.left - slop || event.x > kr.rect.right + slop ||
+                        event.y < kr.rect.top - slop || event.y > kr.rect.bottom + slop
+                    if (outside != pttCancelArmed) {
+                        pttCancelArmed = outside
+                        invalidate()
+                    }
+                }
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
                 if (pttHeld) {
                     pttHeld = false
-                    listener?.onPttUp()
+                    pttCancelArmed = false
+                    listener?.onPttCancel() // W14：系统夺走手势按取消语义（不上屏）
                 }
                 pressed = null
                 invalidate()

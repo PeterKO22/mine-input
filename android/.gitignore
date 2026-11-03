@@ -1,3 +1,7 @@
 .gradle/
 build/
 local.properties
+
+# W14：外部预编译产物（fetch-deps.sh 下载并 SHA256 校验；不进 git）
+app/libs/*.jar
+local-repo/**/*.aar

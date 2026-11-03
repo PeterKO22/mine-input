@@ -3,6 +3,8 @@
 
     <!-- W11：同步客户端直接 HTTP（Hub 内网明文，远程部署前须上 TLS——W4/W8 同口径） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- W14：PTT 语音输入（AudioRecord 16k mono，内存缓冲不落盘） -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".MineInputApp"

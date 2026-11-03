@@ -13,6 +13,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // W14：sherpa-onnx 预编译 AAR 的本地 Maven 仓库（AGP 8+ 不支持直接 .aar 文件依赖；
+        // fetch-deps.sh 下载 AAR + SHA256 校验，POM 在 git 内）
+        maven(url = uri("${rootDir}/local-repo"))
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/central")
         google()

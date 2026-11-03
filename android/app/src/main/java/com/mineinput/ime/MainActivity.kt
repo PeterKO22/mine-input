@@ -84,6 +84,31 @@ class MainActivity : Activity() {
         root.addView(button("② 选择输入法") {
             startActivity(Intent("android.settings.SHOW_INPUT_METHOD_PICKER"))
         })
+
+        // W14：语音输入准备——首用下载式模型 + 麦克风权限
+        root.addView(body("3. 语音输入（W14 PTT）：模型首用下载，不进 APK"))
+        val voiceStatus = body(
+            if (com.mineinput.ime.voice.ModelManager.isInstalled(this)) "语音模型已就绪"
+            else "语音模型未安装 · 点下方按钮下载（约 160MB，SHA256 校验）"
+        )
+        root.addView(voiceStatus)
+        root.addView(button("③ 下载/校验语音模型") {
+            voiceStatus.text = "下载中…（logcat tag=W14 可看进度）"
+            kotlin.concurrent.thread(name = "w14-model-ui") {
+                val ok = com.mineinput.ime.voice.ModelManager.install(this) {
+                    android.util.Log.i(com.mineinput.ime.voice.ModelManager.TAG, it)
+                }
+                if (ok) com.mineinput.ime.voice.AsrEngine.load(this)
+                runOnUiThread {
+                    voiceStatus.text = if (ok) "语音模型已就绪（离线可用）"
+                    else "下载失败 · 请检查网络后重试（logcat tag=W14）"
+                }
+            }
+        })
+        root.addView(button("④ 授权麦克风（语音输入）") {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 1)
+        })
+
         root.addView(button("⚙ 打开设置（A4）") {
             startActivity(Intent(this, SettingsActivity::class.java))
         })
