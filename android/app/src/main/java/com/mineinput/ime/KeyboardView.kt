@@ -27,7 +27,11 @@ class KeyboardView constructor(
         fun onCandidate(index: Int)
         fun onPttDown()
         fun onPttUp()
+        fun onSettings() // W11：状态条「⚙ 设置」入口
     }
+
+    /** W11 状态位（FR8 采集状态常显）：label + 是否激活 + 激活色。 */
+    data class Bit(val label: String, val active: Boolean, val color: Int)
 
     var listener: Listener? = null
 
@@ -61,10 +65,12 @@ class KeyboardView constructor(
     private var composing: String = ""
     private var candidates: List<String> = emptyList()
     private var statusLine: String = ""
+    private var stateBits: List<Bit> = emptyList()
     private var shiftOn: Boolean = false
 
     private val keyRects = mutableListOf<KeyRect>()
     private val candidateRects = mutableListOf<RectF>()
+    private var gearRect: RectF = RectF() // W11 设置入口命中区
     private var pressed: KeyRect? = null
     private var pttHeld = false
 
@@ -92,10 +98,11 @@ class KeyboardView constructor(
         typeface = Typeface.MONOSPACE   // 数字一律 mono
     }
 
-    fun updateState(composing: String, candidates: List<String>, statusLine: String) {
+    fun updateState(composing: String, candidates: List<String>, statusLine: String, bits: List<Bit> = emptyList()) {
         this.composing = composing
         this.candidates = candidates
         this.statusLine = statusLine
+        this.stateBits = bits
         if (width > 0) layoutKeys(width) // 候选数量变化 → 重排候选栏命中区
         invalidate()
     }
@@ -126,6 +133,8 @@ class KeyboardView constructor(
             }
         }
         y += candidateHeight + keyGap
+        // W11：状态条右侧「⚙ 设置」入口命中区 + 状态位
+        gearRect = RectF(w - keyMargin - dp(64f), y, w - keyMargin, y + statusHeight)
         y += statusHeight + keyGap
         for (row in rows) {
             val totalWeight = row.sumOf { it.weight.toDouble() }.toFloat()
@@ -163,15 +172,42 @@ class KeyboardView constructor(
         }
 
         // 状态行（听写中 = cyan；其余弱化）
+        val statusY = keyGap + candidateHeight + statusHeight / 2
         paintTextMono.color = if (pttHeld) DesignTokens.cyan else DesignTokens.textMuted
         paintTextMono.textSize = dp(11f)
         val statusText = if (composing.isNotEmpty() && statusLine.isEmpty()) "码：$composing" else statusLine
         canvas.drawText(
             statusText,
             keyMargin + dp(4f),
-            keyGap + candidateHeight + statusHeight / 2 - (paintTextMono.descent() + paintTextMono.ascent()) / 2,
+            statusY - (paintTextMono.descent() + paintTextMono.ascent()) / 2,
             paintTextMono,
         )
+
+        // W11 状态位（FR8 采集状态常显）：C0/C2/HW/熔断/Hub 小胶囊
+        paintTextMono.textSize = dp(9f)
+        var bx = gearRect.left - dp(6f)
+        for (bit in stateBits.asReversed()) {
+            val label = if (bit.active) "${bit.label}✓" else "${bit.label}·"
+            val tw = paintTextMono.measureText(label)
+            val chipW = tw + dp(10f)
+            val rect = RectF(bx - chipW, statusY - statusHeight / 2 + dp(3f), bx, statusY + statusHeight / 2 - dp(3f))
+            paintFill.color = DesignTokens.card
+            canvas.drawRoundRect(rect, dp(4f), dp(4f), paintFill)
+            paintStroke.color = if (bit.active) bit.color else DesignTokens.stroke
+            canvas.drawRoundRect(rect, dp(4f), dp(4f), paintStroke)
+            paintTextMono.color = if (bit.active) bit.color else DesignTokens.textMuted
+            canvas.drawText(label, rect.centerX(), statusY - (paintTextMono.descent() + paintTextMono.ascent()) / 2, paintTextMono)
+            bx = rect.left - dp(4f)
+        }
+
+        // W11 设置入口 chip（「⚙ 设置」）
+        paintFill.color = DesignTokens.card
+        canvas.drawRoundRect(gearRect, dp(4f), dp(4f), paintFill)
+        paintStroke.color = DesignTokens.stroke
+        canvas.drawRoundRect(gearRect, dp(4f), dp(4f), paintStroke)
+        paintTextMono.color = DesignTokens.textMuted
+        paintTextMono.textSize = dp(9f)
+        canvas.drawText("⚙ 设置", gearRect.centerX(), statusY - (paintTextMono.descent() + paintTextMono.ascent()) / 2, paintTextMono)
 
         // 键帽
         for (kr in keyRects) {
@@ -212,6 +248,11 @@ class KeyboardView constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // W11：状态条「⚙ 设置」入口
+                if (gearRect.contains(event.x, event.y)) {
+                    listener?.onSettings()
+                    return true
+                }
                 val cand = candidateRects.indexOfFirst { it.contains(event.x, event.y) }
                 if (cand >= 0 && cand < candidates.size) {
                     listener?.onCandidate(cand)

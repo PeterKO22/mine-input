@@ -1,13 +1,22 @@
 package com.mineinput.ime
 
+import android.content.Intent
 import android.inputmethodservice.InputMethodService
 import android.view.KeyEvent
 import android.view.View
+import com.mineinput.ime.sync.SyncManager
+import org.json.JSONObject
 
 /**
- * mine-input Android 基座 —— Kotlin IMS 骨架（W5）。
+ * mine-input Android 基座 —— Kotlin IMS 骨架（W5）+ W11 集成。
  * 已实现：QWERTY 输入 → 组合码（composing）→ 候选栏占位（五笔/拼音混合标签）→ 上屏；
  * PTT 大键按住即说交互（UI 状态机占位，语音管线按技术方案 §6 后续接入）。
+ *
+ * W11 集成：
+ *   - 状态位展示：C0/C2/热词同意位、熔断位、Hub 连接位（键盘状态条常显，FR8）；
+ *   - 设置入口：状态条右侧「⚙ 设置」；
+ *   - 真实上报：候选点选 → candidate_pick 事件、PTT 松开 → voice_session 事件
+ *     （C0 同意 + 未熔断才入队上报，撤回同意后不再上报；静默入离线队列）。
  * 引擎接线点：[compose]（librime/自研混合引擎落点）与 [onPttDown]/[onPttUp]（FR2 管线）。
  */
 class MineImeService : InputMethodService(), KeyboardView.Listener {
@@ -70,8 +79,11 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onCandidate(index: Int) {
+        val code = composing.toString()
         val c = candidates().getOrNull(index) ?: return
         commit(c)
+        // W11 真实上报：candidate_pick 交互事件 + L1 词典/L2 计数学习（同意门控，静默）
+        learnAndReport(code, c)
         refresh("")
     }
 
@@ -83,7 +95,27 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
 
     override fun onPttUp() {
         currentInputConnection?.commitText("〈语音转写占位〉", 1)
+        // W11 真实上报：voice_session 事件（C0 同意 + 未熔断才上报）
+        SyncManager.init(this)
+        SyncManager.recordInteraction(
+            JSONObject()
+                .put("ts", System.currentTimeMillis())
+                .put("device_id", Prefs.Pairing(this).deviceId)
+                .put("app_id", "com.mineinput.ime")
+                .put("kind", "voice_session")
+                .put("text_in", "")
+                .put("text_out", "〈语音转写占位〉")
+        )
         refresh("松开→上屏（语音管线占位）")
+    }
+
+    // ---- W11：设置入口（键盘状态条「⚙ 设置」） ----
+
+    override fun onSettings() {
+        startActivity(
+            Intent(this, SettingsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
     }
 
     // ---- 内部 ----
@@ -91,6 +123,31 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
     private fun commit(text: String) {
         currentInputConnection?.commitText(text, 1)
         composing.clear()
+    }
+
+    /** L1 词典 / L2 习惯计数 + 事件上报（全部受同意/熔断门控；撤回同意后不再上报）。 */
+    private fun learnAndReport(code: String, picked: String) {
+        SyncManager.init(this)
+        val settings = Prefs.SettingsStore(this)
+        val consent = Prefs.Consent(this)
+        val now = System.currentTimeMillis()
+        if (!settings.fuseBlown && consent.c0) {
+            if (settings.learnL1) {
+                SyncManager.store.putUserdb("wubi/$code", picked, now) // userdb 时间戳取新
+            }
+            if (settings.learnL2) {
+                SyncManager.store.addCounter("l2_pick", 1L)            // 计数器增量累加
+            }
+        }
+        SyncManager.recordInteraction(
+            JSONObject()
+                .put("ts", now)
+                .put("device_id", Prefs.Pairing(this).deviceId)
+                .put("app_id", "com.mineinput.ime")
+                .put("kind", "candidate_pick")
+                .put("text_in", code)
+                .put("text_out", picked)
+        )
     }
 
     /**
@@ -112,7 +169,28 @@ class MineImeService : InputMethodService(), KeyboardView.Listener {
 
     private fun refresh(status: String) {
         if (::keyboardView.isInitialized) {
-            keyboardView.updateState(composing.toString(), candidates(), status)
+            SyncManager.init(this)
+            val consent = Prefs.Consent(this)
+            val pairing = Prefs.Pairing(this)
+            val settings = Prefs.SettingsStore(this)
+            // 状态位（FR8 采集状态常显）：同意位 + 熔断位 + Hub 连接位
+            val bits = listOf(
+                KeyboardView.Bit("C0", consent.c0, DesignTokens.cyan),
+                KeyboardView.Bit("C2", consent.c2, DesignTokens.red),
+                KeyboardView.Bit("HW", consent.hotword, DesignTokens.gold),
+                KeyboardView.Bit("熔断", settings.fuseBlown, DesignTokens.red),
+                KeyboardView.Bit("Hub", pairing.paired, DesignTokens.green),
+            )
+            val cands = candidates()
+            val statusText = when {
+                status.isNotEmpty() -> status
+                composing.isNotEmpty() && cands.isNotEmpty() -> "码：$composing · 候选 ${cands.size}"
+                composing.isNotEmpty() -> "码：$composing"
+                settings.fuseBlown -> "熔断中 · 采集与上报已停止"
+                !consent.any -> "未同意采集 · 不上报"
+                else -> "就绪"
+            }
+            keyboardView.updateState(composing.toString(), cands, statusText, bits)
         }
     }
 }

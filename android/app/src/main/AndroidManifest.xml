@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- W11：同步客户端直接 HTTP（Hub 内网明文，远程部署前须上 TLS——W4/W8 同口径） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
+        android:name=".MineInputApp"
         android:label="@string/app_name"
         android:theme="@style/Theme.MineInput"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -14,6 +19,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- W11：A5 知情同意 + Hub 配对（首次启动） -->
+        <activity
+            android:name=".ConsentActivity"
+            android:exported="true" />
+
+        <!-- W11：A4 设置入口与分区详情 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="true" />
+        <activity
+            android:name=".SectionActivity"
+            android:exported="true" />
+
+        <!-- W11：端到端调试通道（仅 debug 包响应，release 忽略） -->
+        <receiver
+            android:name=".DebugReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.mineinput.ime.DEBUG_ACTION" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".MineImeService"
