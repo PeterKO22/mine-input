@@ -1,7 +1,18 @@
 # ai_hub_client — mine-input 同步 SDK（W8）
 
 C++17 + libcurl + SQLite3（均为 macOS/Xcode 自带），无其他依赖。对接
-`hub/app/main.py`（W4 FastAPI Hub，Docker 容器默认 `http://localhost:8088`）。
+`hub/app/main.py`（W4 FastAPI Hub，W17 起默认走 HTTPS 边车 `https://localhost:8443`，
+HTTP 明文回退 `http://localhost:8088` 仅本机）。
+
+## TLS（W17）
+
+- 默认 `base_url="https://localhost:8443"`，**按 CA 验证服务端**：
+  `ClientConfig::ca_bundle = "<repo>/hub/tls/certs/ca.crt"`（自签 CA，`hub/tls/gen-certs.sh` 产物）；
+  不设则用系统信任库（自签证书会被拒——这是预期，错误信息带修复提示）；
+- `ClientConfig::tls_insecure = true` 跳过校验（**仅调试**）；
+- HTTP 明文回退：`base_url="http://localhost:8088"`（无需任何 TLS 配置）；
+- 环境变量（sync-demo / 单测真实 Hub 集成用）：
+  `AI_HUB_URL`（默认 https://localhost:8443）、`AI_HUB_CA=<ca.pem>`、`AI_HUB_TLS_INSECURE=1`。
 
 ## 能力
 
@@ -20,7 +31,8 @@ cd sdk
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 cd build && ctest --output-on-failure   # 单测（mock HTTP + 真实 Hub 集成自跳过）
-./sync-demo                             # 验收 demo（默认 http://localhost:8088，$AI_HUB_URL 可覆盖）
+./sync-demo                             # 验收 demo（默认 https://localhost:8443 + CA 自动探测；
+                                        #   $AI_HUB_URL / $AI_HUB_CA / $AI_HUB_TLS_INSECURE 可覆盖）
 ```
 
 ## 用法摘录
@@ -30,7 +42,8 @@ cd build && ctest --output-on-failure   # 单测（mock HTTP + 真实 Hub 集成
 using namespace aihub;
 
 ClientConfig cfg;
-cfg.base_url = "http://localhost:8088";
+cfg.base_url = "https://localhost:8443";   // W17 默认 HTTPS
+cfg.ca_bundle = "hub/tls/certs/ca.crt";    // 自签 CA（http:// 回退时无需）
 cfg.device_id = "devA";
 HubClient client(cfg);
 client.login("user", "pass");

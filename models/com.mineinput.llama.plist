@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.mineinput.llama —— 原生 llama-server 用户级 launchd 托管（W17）。
+  本文件是模板：{{MODELS_DIR}} 由 run-llama-native.sh load 渲染替换为绝对路径后
+  安装到 ~/Library/LaunchAgents/com.mineinput.llama.plist（机器本地产物，勿手拷）。
+  语义：RunAtLoad=登录自启；KeepAlive=崩溃/退出自动拉起（ThrottleInterval 防拉起风暴）；
+  日志轮转由 run-llama-native.sh serve（每次拉起前按大小轮转 .llama-native.log）承担。
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mineinput.llama</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>{{MODELS_DIR}}/run-llama-native.sh</string>
+    <string>serve</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{MODELS_DIR}}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LLAMA_PORT</key>
+    <string>8092</string>
+    <key>LLAMA_CTX</key>
+    <string>2048</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardOutPath</key>
+  <string>{{MODELS_DIR}}/.llama-native.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{MODELS_DIR}}/.llama-native.launchd.log</string>
+</dict>
+</plist>

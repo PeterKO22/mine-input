@@ -172,8 +172,13 @@ struct SuggestContext {             // AiContext
 // ---------------------------------------------------------------- 配置
 
 struct ClientConfig {
-  std::string base_url = "http://localhost:8088";
+  std::string base_url = "https://localhost:8443";  // W17 起默认 HTTPS（tls 边车 :8443）
   std::string device_id = "dev-unknown";
+  // TLS（W17）：https 时按 CA 验证服务端。ca_bundle 指向自签 CA 证书（PEM，即
+  // hub/tls/gen-certs.sh 产物 ca.crt），留空则用系统信任库；tls_insecure 跳过
+  // 校验（仅调试用）。HTTP 明文回退：base_url 用 http://localhost:8088（loopback）。
+  std::string ca_bundle;
+  bool tls_insecure = false;
   long connect_timeout_ms = 2000;
   long request_timeout_ms = 8000;   // sync/ingest/auth 后台通道
   long suggest_budget_ms = 800;     // §7：800ms 弃一轮（调用方预算，可调）

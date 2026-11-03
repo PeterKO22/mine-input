@@ -20,6 +20,10 @@ struct Request {
   std::string bearer_token;      // 空则不带 Authorization
   std::string body;              // JSON 请求体（POST 时）
   bool accept_sse = false;       // Accept: text/event-stream
+  // TLS（W17）：https 时校验对端；ca_info=CA 证书 PEM 路径（空=系统信任库），
+  // tls_insecure 跳过校验（仅调试）。
+  std::string ca_info;
+  bool tls_insecure = false;
   long connect_timeout_ms = 2000;
   long timeout_ms = 8000;
   ChunkHandler on_chunk;         // 流式响应块；设置时不累积 body

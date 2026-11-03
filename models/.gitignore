@@ -6,3 +6,6 @@
 llama.cpp-b*/
 .llama-native.pid
 .llama-native.log
+.llama-native.log.*
+.llama-native.launchd.log
+.llama-native.launchd.log.*

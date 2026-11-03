@@ -1,5 +1,7 @@
 // W8 sdk 单测入口。最后一组为「真实 Hub 集成」：AI_HUB_URL（默认
-// http://localhost:8088）不可达时自跳过，可达时跑最小回环（注册→token→whoami）。
+// https://localhost:8443，W17 起 HTTPS）不可达时自跳过，可达时跑最小回环
+//（注册→token→whoami）。TLS：AI_HUB_CA=<ca.pem> 指定自签 CA，
+// AI_HUB_TLS_INSECURE=1 跳过校验；HTTP 明文回退：AI_HUB_URL=http://localhost:8088。
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -14,13 +16,16 @@ void run_client_tests();
 
 static void run_realhub_tests() {
   const char* url_env = std::getenv("AI_HUB_URL");
-  std::string base = url_env ? url_env : "http://localhost:8088";
+  std::string base = url_env ? url_env : "https://localhost:8443";
   std::printf("[real-hub] %s\n", base.c_str());
 
   aihub::ClientConfig cfg;
   cfg.base_url = base;
   cfg.connect_timeout_ms = 1500;
   cfg.request_timeout_ms = 3000;
+  // TLS（W17）：AI_HUB_CA=<ca.pem>（自签 CA）；AI_HUB_TLS_INSECURE=1 仅调试
+  if (const char* ca = std::getenv("AI_HUB_CA")) cfg.ca_bundle = ca;
+  cfg.tls_insecure = std::getenv("AI_HUB_TLS_INSECURE") != nullptr;
   aihub::HubClient client(cfg);
 
   std::string user = "w8sdk-it-" + aihub::HubClient::make_push_id().substr(2, 10);

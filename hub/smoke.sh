@@ -5,16 +5,40 @@
 #       → push2(userdb 取新 + 计数器累加) → pull 一致性校验 → 多用户分区隔离
 #       → ingest(合法/非法) → suggest SSE（含 W10 真模型 case 11b–11e）→ 401 负例
 #
-# 用法：BASE_URL=http://localhost:8088 ./smoke.sh   （默认与 docker-compose.yml 的 HUB_PORT 一致）
+# 用法：BASE_URL=https://localhost:8443 ./smoke.sh   （默认走 W17 HTTPS，CA 验证）
+# TLS（W17）：默认 BASE_URL=https://localhost:8443 且用 tls/certs/ca.crt 验证服务端；
+#   SMOKE_CA=<ca.pem>         指定 CA（默认 <hub>/tls/certs/ca.crt）
+#   SMOKE_TLS_INSECURE=1      跳过证书校验（仅调试）
+#   BASE_URL=http://localhost:8088  切回 HTTP 明文回退（hub 默认只绑 loopback）
 # 真模型 case（11b–11e）需真后端在线：
-#   默认档 = 宿主机原生 7B（models/run-llama-native.sh start，宿主端口 8092）
+#   默认档 = 宿主机原生 7B（models/run-llama-native.sh start|load，宿主端口 8092）
 #   降级档 = compose --profile model 的 0.5B（MODEL_HEALTH_URL=http://localhost:8091/health）
 # 真后端档位断言（W13）：SMOKE_EXPECT_MODEL=<done 帧 model 须含的子串>，
 #   如 SMOKE_EXPECT_MODEL=qwen2.5-7b ./smoke.sh 断言真 7B 后端；
 # 仅跑桩链路时：SMOKE_MODEL_REQUIRED=0 ./smoke.sh（11b–11e 降级为 SKIP）
 set -u
 
-BASE_URL="${BASE_URL:-http://localhost:8088}"
+BASE_URL="${BASE_URL:-https://localhost:8443}"
+CA_FILE="${SMOKE_CA:-$(cd "$(dirname "$0")" && pwd)/tls/certs/ca.crt}"
+
+# ---- TLS 参数：所有 curl 统一注入（薄包装函数；HTTP 明文时不加任何 TLS 参数）----
+TLS_OPTS=()
+case "$BASE_URL" in
+  https://*)
+    if [ "${SMOKE_TLS_INSECURE:-0}" = "1" ]; then
+      TLS_OPTS+=(-k)
+      printf '[tls] 校验跳过（SMOKE_TLS_INSECURE=1，仅调试）\n' >&2
+    elif [ -f "$CA_FILE" ]; then
+      TLS_OPTS+=(--cacert "$CA_FILE")
+      printf '[tls] CA 验证：%s\n' "$CA_FILE" >&2
+    else
+      printf '[error] https 需 CA：%s 不存在（./tls/gen-certs.sh 生成；或 SMOKE_CA=<ca.pem> 指定；或 SMOKE_TLS_INSECURE=1 跳过）\n' "$CA_FILE" >&2
+      exit 1
+    fi ;;
+  *) printf '[tls] HTTP 明文回退（BASE_URL=%s）\n' "$BASE_URL" >&2 ;;
+esac
+curl() { command curl ${TLS_OPTS[@]+"${TLS_OPTS[@]}"} "$@"; }
+
 PASS=0
 FAIL=0
 STAMP=$(date +%s)

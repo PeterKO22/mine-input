@@ -8,15 +8,61 @@
 ## 快速开始
 
 ```bash
-./models/run-llama-native.sh start    # 起宿主机原生模型后端（默认 7B Q4_K_M，端口 8092）
-docker compose up -d --build          # 起 Hub（宿主机端口默认 8088，HUB_PORT 可覆盖）
-./smoke.sh                            # 全链路 curl 冒烟（默认 http://localhost:8088）
+./models/run-llama-native.sh load    # 模型后端 launchd 托管（开机自启/崩溃拉起/日志轮转，W17）
+cd hub && ./tls/gen-certs.sh && cd ..  # 一次性：自签 CA + HTTPS 证书（W17）
+docker compose up -d --build          # 起 Hub + nginx TLS 边车（宿主机 HTTPS 端口默认 8443）
+./hub/smoke.sh                        # 全链路 curl 冒烟（默认 https://localhost:8443，CA 验证）
 docker compose down                   # 停（数据在 hub-data 卷，不丢）
-./models/run-llama-native.sh stop     # 停原生模型后端
+./models/run-llama-native.sh unload   # 不再托管模型后端
 ```
 
-> 本机宿主 8080 已被其他服务占用，故默认端口 8088；`HUB_PORT=8080 docker compose up -d`
-> 可改回。smoke.sh 用 `BASE_URL` 环境变量跟随。
+> 本机宿主 8080 已被其他服务占用，故默认端口 8088；`HUB_HTTP_PORT=8080 docker compose up -d`
+> 可改回。smoke.sh 用 `BASE_URL` 环境变量跟随。**W17 起对外统一 HTTPS :8443**，
+> HTTP 明文（:8088）只绑 loopback 作可选回退（`HUB_HTTP_BIND=0.0.0.0` 可重开明文）。
+
+## TLS（W17）：自签 CA + HTTPS 终结
+
+```
+客户端 ── https://<host>:8443 ──> nginx tls 边车（TLS 终结，SSE 直通）──> hub:8080
+```
+
+- **证书**：`./tls/gen-certs.sh` 自签 CA 签发（RSA-2048，SAN 含 localhost/127.0.0.1/hub/
+  host.docker.internal/本机名，命令行可追加）；产物 `tls/certs/`（`ca.key`/`server.key`
+  0600，**不入库**，.gitignore 挡）；
+- **客户端验证**：把 `ca.crt` 给客户端——curl `--cacert tls/certs/ca.crt`、
+  smoke 默认即带（`SMOKE_CA=` 可换、`SMOKE_TLS_INSECURE=1` 仅调试跳过）、
+  SDK `ClientConfig::ca_bundle`（`AI_HUB_CA` 环境变量）；没装 CA 的客户端**直接拒绝连接**；
+- **HTTP 明文回退**：`BASE_URL=http://127.0.0.1:8088 ./hub/smoke.sh` / SDK
+  `base_url="http://localhost:8088"`（默认只绑 127.0.0.1）；
+- ⚠️ 证书须 **RSA**（勿换 EC）：macOS 系统 curl（LibreSSL 3.3.6）对 OpenSSL 3.x 服务端的
+  TLS 1.3 + ECDSA leaf 握手失败（`tlsv1 alert decode error`），定位见 W17-REPORT §5。
+
+## 备份 / 恢复（W17）
+
+```bash
+cd hub
+./backup.sh                # SQLite 在线一致快照（WAL 安全）+ hub-secret + SHA256 清单 → backups/
+./restore.sh latest        # 校验 → 停服换入（清 WAL 残留）→ 起服 → 行数核对
+./restore.sh backups/hub-backup-<stamp>.tar.gz   # 指定包
+```
+
+- 备份包含 **hub-secret**（token HMAC 密钥）：0600 保管、勿入库；泄密可伪造 token；
+- 恢复是整体覆盖（回到备份时间点），恢复后旧 token 仍有效（secret 一并换回）；
+- 演练实证（时间点回滚 + 行数核对）见 W17-REPORT §4。
+
+## 模型后端 launchd 托管（W17）
+
+```bash
+./models/run-llama-native.sh load      # 装 com.mineinput.llama 用户 agent（推荐常驻形态）
+./models/run-llama-native.sh status    # 手动实例/launchd 状态 + /health
+./models/run-llama-native.sh unload    # 卸载（不再自启/拉起）
+```
+
+- **RunAtLoad**：登录/开机自启；**KeepAlive**：崩溃/被杀自动拉起（实测 kill -9 后
+  `runs=2` 新 pid 复活，见 W17-REPORT §3）；
+- **日志轮转**：每次拉起前按大小轮转 `models/.llama-native.log`（默认 10MB×3 代，
+  `LLAMA_LOG_MAX`/`LLAMA_LOG_KEEP` 可调；`logrotate` 命令手动触发）；
+- 手动形态 `start/stop/restart` 保留为回退（与 launchd 互斥，`load` 会先停手动实例）。
 
 ## API
 
@@ -103,7 +149,8 @@ hub-models 卷 → /models   llama.cpp 模型占位卷（当前为空）
 
 - **密钥分区**：每用户 `key_partition.{id,key}`（注册时签发），为 E2E（Hub 零知识）预留；
 - **静态加密**：预留位——当前 SQLite 明文落卷，上线前需卷级/库级加密；
-- **TLS**：预留位——当前 HTTP（内网默认形态），远程 Hub 形态前必须上 TLS，E2E 可选。
+- **TLS**（W17 已上）：nginx 边车 HTTPS 终结（自签 CA，见上「TLS」节）；
+  HTTP 明文只留 loopback 回退；E2E 加密仍为可选。
 
 ## 模型后端：两档切换（W13：宿主机原生 7B 默认档 + 容器内 0.5B 降级档）
 
@@ -163,13 +210,19 @@ hub/
   app/prompts.py      版本化提示词模板（4 场景，few-shot；W10）
   app/model_backend.py  llama.cpp 转发 + SSE 组帧 + 弃轮不扰服务端（W10）
   Dockerfile          python:3.12-slim + uvicorn
-  docker-compose.yml   hub 服务 + SQLite 卷 + llama.cpp 模型服务（profile: model）
-  smoke.sh            全链路 curl 冒烟（含真模型 case 11b–11e + W13 档位断言 SMOKE_EXPECT_MODEL）
+  docker-compose.yml   hub + nginx TLS 边车 + llama.cpp 模型服务（profile: model）
+  tls/gen-certs.sh    自签 CA + HTTPS 证书生成（RSA-2048；产物 certs/ 不入库）
+  tls/nginx.conf      TLS 终结 + 反代（SSE 直通）
+  backup.sh/restore.sh  SQLite+secret 一键备份/恢复（W17）
+  smoke.sh            全链路 curl 冒烟（默认 https://localhost:8443，CA 验证）
   bench_latency.py    延迟实测（ttft/帧间隔/总耗时，markdown 表）
+  DEPLOY-FRIENDS.md   朋友部署一页纸（含多用户隔离说明；W17）
   W4-REPORT.md        车道报告（含 curl 实测输出）
   W10-REPORT.md       W10 真模型后端报告（延迟表 + blocker）
   W13-REPORT.md       W13 宿主机原生 7B 报告（延迟表 7B vs 0.5B + 换档）
+  W17-REPORT.md       W17 基础设施加固报告（launchd/TLS/备份恢复演练）
 models/               大模型文件（不入库；fetch_model.sh 可复现拉取/校验/灌入卷）
-  run-llama-native.sh 宿主机原生 llama.cpp 管理（start/stop/restart/status/health，默认 7B）
+  run-llama-native.sh 宿主机原生 llama.cpp 管理（load/unload launchd 托管 + start/stop/status）
+  com.mineinput.llama.plist  launchd 用户 agent 模板（load 时渲染安装；W17）
   llama.cpp-b12078/   llama.cpp GitHub Releases 预编译（macOS arm64 + Metal，不入库）
 ```

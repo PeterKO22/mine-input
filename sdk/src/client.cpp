@@ -115,6 +115,8 @@ Result<RegisterResult> HubClient::register_user(const std::string& username,
   body.set("password", Value(password));
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/auth/register";
   req.body = body.serialize();
   req.connect_timeout_ms = cfg_.connect_timeout_ms;
@@ -150,6 +152,8 @@ Result<TokenResult> HubClient::login(const std::string& username,
   body.set("password", Value(password));
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/auth/token";
   req.body = body.serialize();
   req.connect_timeout_ms = cfg_.connect_timeout_ms;
@@ -179,6 +183,8 @@ Result<TokenResult> HubClient::login(const std::string& username,
 Result<WhoamiResult> HubClient::whoami() {
   Result<WhoamiResult> r;
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.method = "GET";
   req.url = cfg_.base_url + "/v1/auth/whoami";
   req.bearer_token = token_;
@@ -207,6 +213,8 @@ Result<PushResult> HubClient::push(const PushPayload& payload) {
   if (p.push_id.empty()) p.push_id = make_push_id();
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/sync/push";
   req.bearer_token = token_;
   req.body = ser::push_payload_to_json(p).serialize();
@@ -243,6 +251,8 @@ Result<PullState> HubClient::pull(std::optional<int64_t> since) {
   if (since) body.set("since", Value(*since));
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/sync/pull";
   req.bearer_token = token_;
   req.body = body.serialize();
@@ -301,6 +311,8 @@ Result<IngestResult> HubClient::ingest(const InteractionEvent& event) {
   }
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/ingest";
   req.bearer_token = token_;
   req.body = ser::event_to_json(e).serialize();
@@ -336,6 +348,8 @@ Status HubClient::suggest(const SuggestContext& ctx,
   bool cb_abort = false;
 
   http::Request req;
+  req.ca_info = cfg_.ca_bundle;
+  req.tls_insecure = cfg_.tls_insecure;
   req.url = cfg_.base_url + "/v1/suggest";
   req.bearer_token = token_;
   req.body = body.serialize();

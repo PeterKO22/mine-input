@@ -3,10 +3,13 @@
 //   2) push 往返一致：userdb 时间戳取新、计数器增量累加、push_id 幂等重试
 //   3) 断网入队 → 联网补传成功（离线队列）
 //   4) suggest SSE 多帧消费（回调式）
-// 用法：./sync-demo [base_url]   （默认 $AI_HUB_URL 或 http://localhost:8088）
+// 用法：./sync-demo [base_url]   （默认 $AI_HUB_URL 或 https://localhost:8443）
+// TLS（W17）：AI_HUB_CA=<ca.pem> 指定自签 CA（默认 ../hub/tls/certs/ca.crt 若存在）；
+//   AI_HUB_TLS_INSECURE=1 跳过校验（仅调试）；HTTP 明文回退：AI_HUB_URL=http://localhost:8088
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -37,7 +40,7 @@ int main(int argc, char** argv) {
   std::string base = argc > 1 ? argv[1] : "";
   if (base.empty()) {
     const char* env = std::getenv("AI_HUB_URL");
-    base = env ? env : "http://localhost:8088";
+    base = env ? env : "https://localhost:8443";
   }
   std::printf("=== mine-input hub-client sync-demo ===\nHub: %s\n\n", base.c_str());
 
@@ -47,6 +50,23 @@ int main(int argc, char** argv) {
   cfg.connect_timeout_ms = 2000;
   cfg.request_timeout_ms = 8000;
   cfg.suggest_budget_ms = 800;
+  // TLS（W17）：自签 CA 验证（AI_HUB_CA 显式 > 仓库相对路径自动探测）
+  if (const char* ca = std::getenv("AI_HUB_CA")) {
+    cfg.ca_bundle = ca;
+  } else if (std::ifstream("../hub/tls/certs/ca.crt").good()) {
+    cfg.ca_bundle = "../hub/tls/certs/ca.crt";      // 从 sdk/ 运行
+  } else if (std::ifstream("../../hub/tls/certs/ca.crt").good()) {
+    cfg.ca_bundle = "../../hub/tls/certs/ca.crt";   // 从 sdk/build/ 运行
+  } else if (std::ifstream("hub/tls/certs/ca.crt").good()) {
+    cfg.ca_bundle = "hub/tls/certs/ca.crt";         // 从仓库根运行
+  }
+  cfg.tls_insecure = std::getenv("AI_HUB_TLS_INSECURE") != nullptr;
+  if (!cfg.ca_bundle.empty())
+    std::printf("CA: %s\n", cfg.ca_bundle.c_str());
+  else if (cfg.tls_insecure)
+    std::printf("CA: (跳过校验，AI_HUB_TLS_INSECURE)\n");
+  else
+    std::printf("CA: (系统信任库)\n");
 
   std::string user = "w8demo-" + HubClient::make_push_id().substr(2, 10);
   const std::string pass = "w8demo-pass-123";

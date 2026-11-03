@@ -103,6 +103,15 @@ Reply perform(const Request& req) {
   curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 
+  // TLS（W17）：https 校验对端（自签 CA 走 ca_info）；tls_insecure 仅调试
+  if (!req.ca_info.empty()) {
+    curl_easy_setopt(curl, CURLOPT_CAINFO, req.ca_info.c_str());
+  }
+  if (req.tls_insecure) {
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+  }
+
   if (req.method == "GET") {
     curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
   } else {
@@ -131,6 +140,12 @@ Reply perform(const Request& req) {
   } else {
     ctx.reply.status.code = Error::Network;
     ctx.reply.status.message = std::string("curl error: ") + curl_easy_strerror(rc);
+    // TLS 失败给可操作提示（自签 CA 场景最常见的配置遗漏）
+    if (rc == CURLE_PEER_FAILED_VERIFICATION || rc == CURLE_SSL_CACERT ||
+        rc == CURLE_SSL_CACERT_BADFILE || rc == CURLE_SSL_CONNECT_ERROR) {
+      ctx.reply.status.message +=
+          " (TLS: 配置 ClientConfig::ca_bundle=ca.crt 或调试用 tls_insecure)";
+    }
   }
   ctx.reply.status.http_status = static_cast<int>(ctx.reply.http_status);
 
