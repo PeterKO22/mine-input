@@ -70,6 +70,12 @@ services:
       # 模型经命名卷分发（VirtioFS bind-mount 的 mmap 在 Docker Desktop VM 内存受限时会
       # OOM，实测见 W10-REPORT；命名卷 ext4 页缓存可回收）。灌入方式见 README「模型灌入」。
       - hub-models:/models
+    healthcheck:
+      # 镜像自带 healthcheck 探 localhost:8080（默认端口），本服务走 8091，覆盖之
+      test: ["CMD", "curl", "-sf", "http://localhost:8091/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
 volumes:
