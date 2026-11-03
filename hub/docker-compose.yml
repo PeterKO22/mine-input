@@ -1,0 +1,66 @@
+# mine-input AI Hub（W4 骨架）
+#
+# 用法：
+#   docker compose up -d --build     # 起 Hub（FastAPI + SQLite）
+#   ./smoke.sh                       # 全链路 curl 冒烟
+#   docker compose down              # 停（数据在 hub-data 卷，不丢）
+#
+# 模型服务是占位（档位已定：7B Q4，见 docs/技术方案-v0.4.md §13 T2 结论），
+# 本任务不下模型。启用方式见下方 llama 服务注释与 hub/README.md。
+
+services:
+  hub:
+    build: .
+    image: mine-input-hub:latest
+    container_name: mine-input-hub
+    ports:
+      # 宿主机 8080 已被本机其他服务占用（multica-backend-1），改用 8088；
+      # 可用 HUB_PORT 环境变量覆盖：HUB_PORT=8080 docker compose up -d --build
+      - "${HUB_PORT:-8088}:8080"
+    environment:
+      HUB_DATA_DIR: /data
+    volumes:
+      # SQLite 卷布局（静态加密预留，见 README「卷布局与加密预留」）：
+      #   /data/hub.db      用户与同步数据（SQLite，WAL）
+      #   /data/hub-secret  Hub 服务签名密钥（token HMAC）
+      - hub-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- llama.cpp 模型服务（占位，未启用）--------------------------------
+  # 档位已定：7B Q4（128GB 统一内存实测无压力，余量可上 14B 档）。
+  # 本任务只放占位与文档，不下大模型（W4 车道范围）。
+  #
+  # 启用步骤（M4 后续 / 模型托管任务）：
+  #   1. 模型放入卷：docker compose --profile model run --rm \
+  #        -v <本机模型目录>:/import llama true   # 或直接 docker cp 进 hub-models 卷
+  #      目标文件名：/models/qwen2.5-7b-instruct-q4_k_m.gguf（可换，命令里同步改）
+  #   2. docker compose --profile model up -d llama
+  #   3. Hub 侧把 /v1/suggest 的 stub 后端切到 llama.cpp 的 /completion
+  llama:
+    profiles: ["model"]        # 不加 --profile model 不会启动、不会拉镜像
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: mine-input-llama
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "-m"
+      - "/models/qwen2.5-7b-instruct-q4_k_m.gguf"
+      - "-c"
+      - "4096"
+    ports:
+      - "8000:8000"
+    volumes:
+      - hub-models:/models
+    restart: unless-stopped
+
+volumes:
+  hub-data:
+  hub-models:
