@@ -1,0 +1,4 @@
+# 大模型文件不入库（获取脚本 fetch_model.sh 可复现拉取）
+*.gguf
+*.gguf.part
+*.bin

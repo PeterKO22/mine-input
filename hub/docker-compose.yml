@@ -19,6 +19,12 @@ services:
       - "${HUB_PORT:-8088}:8080"
     environment:
       HUB_DATA_DIR: /data
+      # W10：/v1/suggest 真模型后端（llama.cpp llama-server，compose 内按服务名直连）
+      MODEL_URL: http://llama:8091
+      # 与 MODEL_FILE 同步（done 帧 model 字段诚实标注实际档位）；换 7B 时一并覆盖
+      MODEL_NAME: ${MODEL_NAME:-qwen2.5-0.5b-instruct-q4_k_m}
+      # 模型不可达时降级流式桩（done 帧 backend=stub-fallback，不冒充真模型）；置 0 关闭
+      SUGGEST_ALLOW_STUB_FALLBACK: ${SUGGEST_ALLOW_STUB_FALLBACK:-1}
     volumes:
       # SQLite 卷布局（静态加密预留，见 README「卷布局与加密预留」）：
       #   /data/hub.db      用户与同步数据（SQLite，WAL）
@@ -32,16 +38,15 @@ services:
       timeout: 5s
       retries: 5
 
-  # ---- llama.cpp 模型服务（占位，未启用）--------------------------------
+  # ---- llama.cpp 模型服务（W10 启用：真后端供 /v1/suggest）--------------
   # 档位已定：7B Q4（128GB 统一内存实测无压力，余量可上 14B 档）。
-  # 本任务只放占位与文档，不下大模型（W4 车道范围）。
+  # 模型在 repo 根 models/（大文件不入库，models/fetch_model.sh 可复现拉取 + 校验），
+  # bind mount 进容器；换模型 drop-in：换 models/ 里的 GGUF 并改 -m 路径（见 README）。
   #
-  # 启用步骤（M4 后续 / 模型托管任务）：
-  #   1. 模型放入卷：docker compose --profile model run --rm \
-  #        -v <本机模型目录>:/import llama true   # 或直接 docker cp 进 hub-models 卷
-  #      目标文件名：/models/qwen2.5-7b-instruct-q4_k_m.gguf（可换，命令里同步改）
-  #   2. docker compose --profile model up -d llama
-  #   3. Hub 侧把 /v1/suggest 的 stub 后端切到 llama.cpp 的 /completion
+  # 启用（--profile model；端口 8091：本机 8088=Hub、8080/8000/8090 均被占用）：
+  #   ./models/fetch_model.sh                # 下载 + SHA256 校验（断点续传）
+  #   docker compose --profile model create && docker compose --profile model start
+  #   ./smoke.sh                             # 含真后端 case（smoke 11b–11d）
   llama:
     profiles: ["model"]        # 不加 --profile model 不会启动、不会拉镜像
     image: ghcr.io/ggml-org/llama.cpp:server
@@ -50,17 +55,23 @@ services:
       - "--host"
       - "0.0.0.0"
       - "--port"
-      - "8000"
+      - "8091"
       - "-m"
-      - "/models/qwen2.5-7b-instruct-q4_k_m.gguf"
+      # 模型档位可换（drop-in，见 README「模型灌入/换模型」）：
+      #   默认：qwen2.5-0.5b-instruct-q4_k_m.gguf（491MB，本机 Docker VM 内存受限可跑）
+      #   目标档 7B Q4_K_M（split 分片喂第一片）：MODEL_FILE=qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
+      #   ⚠️ 7B 需 Docker Desktop VM ≥8GB（建议 16GB）内存，现状 7.75GB 且被共驻服务占 ~3.5GB → OOM
+      - "/models/${MODEL_FILE:-qwen2.5-0.5b-instruct-q4_k_m.gguf}"
       - "-c"
-      - "4096"
+      - "2048"
     ports:
-      - "8000:8000"
+      - "8091:8091"
     volumes:
+      # 模型经命名卷分发（VirtioFS bind-mount 的 mmap 在 Docker Desktop VM 内存受限时会
+      # OOM，实测见 W10-REPORT；命名卷 ext4 页缓存可回收）。灌入方式见 README「模型灌入」。
       - hub-models:/models
     restart: unless-stopped
 
 volumes:
   hub-data:
-  hub-models:
+  hub-models:   # llama.cpp 模型卷（W10 启用；灌入方式见 README「模型灌入」）

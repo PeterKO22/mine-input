@@ -19,9 +19,6 @@ HTTP 字段以 docs/技术方案-v0.4.md 文本为准；SPI 契约字段对齐
   GET  /healthz           健康检查（免鉴权，给 compose healthcheck 用）
 """
 
-import asyncio
-import json
-import secrets
 import time
 from typing import Dict, List, Literal, Optional
 
@@ -29,9 +26,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import auth, db
+from . import auth, db, model_backend
 
-app = FastAPI(title="mine-input AI Hub", version="0.4-w4-skeleton")
+app = FastAPI(title="mine-input AI Hub", version="0.4-w10-model")
 db.init_db()
 
 EventKind = Literal["key_session", "voice_session", "candidate_pick", "suggestion_feedback"]
@@ -94,6 +91,10 @@ class SuggestIn(BaseModel):
     app_id: str = ""
     from_voice: bool = False
     context_digest: str = ""
+    # W10 真模型后端扩展（提示词模板版本化，见 app/prompts.py；场景对齐技术方案 §7/§8）
+    scene: Literal["continuation", "voice_correct", "rescore", "teleprompter"] = "continuation"
+    candidates: List[str] = []  # rescore 场景的候选列表
+    max_tokens: int = Field(default=48, ge=1, le=256)
 
 
 # ---------------------------------------------------------------- auth dep
@@ -176,42 +177,23 @@ def ingest(body: IngestIn, user=Depends(current_user)):
 
 
 # ---------------------------------------------------------------- /v1/suggest
-
-def _stub_suggestions(before_cursor: str):
-    """流式桩：真实后端为 llama.cpp 7B Q4（T2 已定，占位未部署）。"""
-    tail = (before_cursor or "")[-8:]
-    return [
-        {"text": f"{tail}——好的，我稍后处理", "score": 0.86, "source": "hub-stub"},
-        {"text": f"{tail}——请稍等，马上回复", "score": 0.74, "source": "hub-stub"},
-        {"text": f"{tail}——谢谢，收到", "score": 0.61, "source": "hub-stub"},
-    ]
-
-
-async def _sse_stream(ctx: SuggestIn):
-    items = _stub_suggestions(ctx.before_cursor)
-    for i, cand in enumerate(items, 1):
-        cand["seq"] = i
-        yield f"event: suggestion\ndata: {json.dumps(cand, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.15)  # 模拟增量到达（300–500ms 刷新由客户端防抖）
-    done = {
-        "status": "ok",
-        "backend": "stub",           # TODO(M4 后续): llama.cpp 7B Q4
-        "suggestions": len(items),
-        "context_digest": ctx.context_digest,
-    }
-    yield f"event: done\ndata: {json.dumps(done, ensure_ascii=False)}\n\n"
+# W10：流式桩 → llama.cpp llama-server 真模型转发（app/model_backend.py）。
+# 帧流 = suggestion*（Candidate 契约字段 text/score/source + seq）+ done（backend/
+# prompt_version/scene/timings）。800ms 预算语义：弃轮裁决在客户端，Hub 不裁剪；
+# 客户端断开不级联取消上游生成（producer 独立读干，服务端不受影响）。
 
 
 @app.post("/v1/suggest")
-def suggest(body: SuggestIn, user=Depends(current_user)):
+async def suggest(body: SuggestIn, user=Depends(current_user)):
     # 审计日志只记字段（技术方案 v0.4 §7）：user_id / app_id / from_voice / 长度
     print(
         f"[audit] suggest user={user['id']} app={body.app_id!r} "
-        f"from_voice={body.from_voice} before_len={len(body.before_cursor)}",
+        f"from_voice={body.from_voice} scene={body.scene} "
+        f"before_len={len(body.before_cursor)} cands={len(body.candidates)}",
         flush=True,
     )
     return StreamingResponse(
-        _sse_stream(body),
+        model_backend.suggest_sse(body.model_dump()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

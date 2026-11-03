@@ -3,9 +3,11 @@
 #
 # 链路：healthz → 注册(含独立密钥分区) → 鉴权 → push → push 重试(幂等)
 #       → push2(userdb 取新 + 计数器累加) → pull 一致性校验 → 多用户分区隔离
-#       → ingest(合法/非法) → suggest SSE 流式桩 → 401 负例
+#       → ingest(合法/非法) → suggest SSE（含 W10 真模型 case 11b–11e）→ 401 负例
 #
 # 用法：BASE_URL=http://localhost:8088 ./smoke.sh   （默认与 docker-compose.yml 的 HUB_PORT 一致）
+# 真模型 case（11b–11e）需 compose --profile model 起 llama 服务；
+# 仅跑桩链路时：SMOKE_MODEL_REQUIRED=0 ./smoke.sh（11b–11e 降级为 SKIP）
 set -u
 
 BASE_URL="${BASE_URL:-http://localhost:8088}"
@@ -210,6 +212,62 @@ contains "契约字段 source" "$SSE" '"source"'
 contains "SSE event: done" "$SSE" "event: done"
 N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
 [ "$N_SUG" -ge 2 ]; check "流式多帧（suggestion 帧数=${N_SUG:-0}）" $?
+
+# ------------------------------------------- 11b. suggest 真模型（W10，continuation）
+MODEL_REQUIRED="${SMOKE_MODEL_REQUIRED:-1}"
+MODEL_HEALTH_URL="${MODEL_HEALTH_URL:-http://localhost:8091/health}"
+
+if [ "$MODEL_REQUIRED" = "0" ]; then
+  say "11b–11e. suggest 真模型 case（SMOKE_MODEL_REQUIRED=0 → SKIP）"
+  printf '  [SKIP] 真模型 case 已按 SMOKE_MODEL_REQUIRED=0 跳过\n'
+else
+  say "11b. POST /v1/suggest 真模型后端（scene=continuation）"
+  SSE=$(run curl -sN -X POST "$BASE_URL/v1/suggest" \
+    -H "Authorization: Bearer $TOKEN_A" -H 'Content-Type: application/json' \
+    -d '{"before_cursor":"今天开会讨论了第三季度的","app_id":"com.apple.TextEdit","from_voice":false,"context_digest":"ctx-model","scene":"continuation","max_tokens":32}')
+  printf '%s\n' "$SSE"
+  contains "done 帧 backend=llama.cpp（真模型）" "$SSE" '"backend": "llama.cpp"'
+  contains "done 帧带 prompt_version（提示词模板版本化）" "$SSE" '"prompt_version"'
+  contains "done 帧带 timings（延迟实测字段）" "$SSE" '"timings"'
+  contains "suggestion 帧 source 标注真模型" "$SSE" '"source": "llama.cpp'
+  N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
+  [ "$N_SUG" -ge 2 ]; check "真模型流式多帧（suggestion 帧数=${N_SUG:-0}）" $?
+
+  say "11c. POST /v1/suggest 真模型（scene=voice_correct，语音纠错）"
+  SSE=$(run curl -sN -X POST "$BASE_URL/v1/suggest" \
+    -H "Authorization: Bearer $TOKEN_A" -H 'Content-Type: application/json' \
+    -d '{"before_cursor":"我今天去了音行办理信用卡业务","app_id":"com.apple.TextEdit","from_voice":true,"context_digest":"ctx-vc","scene":"voice_correct","max_tokens":32}')
+  printf '%s\n' "$SSE"
+  contains "voice_correct done ok + llama.cpp" "$SSE" '"backend": "llama.cpp"'
+  contains "voice_correct scene 回显" "$SSE" '"scene": "voice_correct"'
+  N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
+  [ "$N_SUG" -ge 1 ]; check "voice_correct 帧数=${N_SUG:-0}" $?
+
+  say "11d. POST /v1/suggest 真模型（scene=rescore，候选重排）"
+  SSE=$(run curl -sN -X POST "$BASE_URL/v1/suggest" \
+    -H "Authorization: Bearer $TOKEN_A" -H 'Content-Type: application/json' \
+    -d '{"before_cursor":"ni hao","app_id":"com.apple.TextEdit","from_voice":false,"context_digest":"ctx-rs","scene":"rescore","candidates":["你好","拟好","泥嚎","倪豪"],"max_tokens":32}')
+  printf '%s\n' "$SSE"
+  contains "rescore done ok + llama.cpp" "$SSE" '"backend": "llama.cpp"'
+  contains "rescore scene 回显" "$SSE" '"scene": "rescore"'
+  N_SUG=$(printf '%s' "$SSE" | grep -c "event: suggestion")
+  [ "$N_SUG" -ge 2 ]; check "rescore 每行一帧多帧（帧数=${N_SUG:-0}）" $?
+
+  say "11e. 客户端弃一轮不影响服务端（800ms 预算语义，W10）"
+  run curl -sN --max-time 2 -X POST "$BASE_URL/v1/suggest" \
+    -H "Authorization: Bearer $TOKEN_A" -H 'Content-Type: application/json' \
+    -d '{"before_cursor":"弃轮测试","app_id":"t","from_voice":false,"context_digest":"ctx-abandon","scene":"continuation","max_tokens":64}' \
+    >/dev/null 2>&1
+  printf '  （curl --max-time 2 提前断开，exit=$? 属预期）\n'
+  sleep 2
+  RESP=$(run curl -sS -m 5 "$MODEL_HEALTH_URL") || RESP=""
+  printf '%s\n' "$RESP"
+  contains "弃轮后 llama-server 仍健康" "$RESP" '"ok"'
+  SSE=$(run curl -sN -X POST "$BASE_URL/v1/suggest" \
+    -H "Authorization: Bearer $TOKEN_A" -H 'Content-Type: application/json' \
+    -d '{"before_cursor":"弃轮后复测","app_id":"t","from_voice":false,"context_digest":"ctx-after","scene":"continuation","max_tokens":16}')
+  contains "弃轮后 suggest 链路仍可用" "$SSE" '"backend": "llama.cpp"'
+fi
 
 # ---------------------------------------------------------------- 12. 401 负例
 say "12. 无效 token（期望 401）"
