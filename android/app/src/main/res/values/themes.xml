@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色科幻：design/design-language.md token -->
+    <style name="Theme.MineInput" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E2924</item>
+        <item name="android:colorBackground">#0E2924</item>
+        <item name="android:textColorPrimary">#E0E6E4</item>
+        <item name="android:statusBarColor">#0E2924</item>
+    </style>
+</resources>
