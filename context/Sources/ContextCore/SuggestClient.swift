@@ -127,9 +127,11 @@ public struct HubSuggestBackend: SuggestBackend {
 
         let finished = FinishedFlag()
         // NFR3：800ms 超时弃本轮（可用 timeout 覆盖），超时补 kTimeout 终止。
+        // W23：捕获进并发闭包前把 req 固化为 let（新版 Swift 对「并发闭包捕获 var」直接报错）。
+        let request = req
         let streamTask = Task {
             do {
-                let (bytes, response) = try await session.bytes(for: req)
+                let (bytes, response) = try await session.bytes(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                     let body = try await Self.readBody(bytes)
                     await finished.terminate(

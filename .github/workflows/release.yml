@@ -47,6 +47,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          # W23: 默认 packages 含已下架的 'tools' 包（sdkmanager 报 Failed to find package）
+          packages: platform-tools
       - name: Install SDK platform 37（compileSdk=37）
         run: sdkmanager "platforms;android-37"
       - name: gradle 缓存
