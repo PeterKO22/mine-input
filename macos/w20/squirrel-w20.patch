@@ -1,0 +1,116 @@
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -110,6 +110,14 @@
+ 		FA7200000000000000000008 /* W12PrompterModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000008 /* W12PrompterModel.swift */; };
+ 		FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000009 /* W12PrompterOverlay.swift */; };
+ 		FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000A /* W12SquirrelGlue.swift */; };
++		FA7600000000000000000001 /* W20MemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000001 /* W20MemoryStore.swift */; };
++		FA7600000000000000000002 /* W20Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000002 /* W20Design.swift */; };
++		FA7600000000000000000003 /* W20ProposalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000003 /* W20ProposalModel.swift */; };
++		FA7600000000000000000004 /* W20ProposalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000004 /* W20ProposalCard.swift */; };
++		FA7600000000000000000005 /* W20MemoryPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000005 /* W20MemoryPanel.swift */; };
++		FA7600000000000000000006 /* W20SquirrelGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000006 /* W20SquirrelGlue.swift */; };
++		FA7600000000000000000007 /* W20ProposalBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000008 /* W20ProposalBridge.mm */; };
++		FA7600000000000000000008 /* null_proposal_agent.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000009 /* null_proposal_agent.cc */; };
+ 		FA720000000000000000000B /* InteractionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000B /* InteractionEvent.swift */; };
+ 		FA720000000000000000000C /* InteractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000C /* InteractionStore.swift */; };
+ 		FA720000000000000000000D /* CircuitBreaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000D /* CircuitBreaker.swift */; };
+@@ -343,6 +351,15 @@
+ 		FA7100000000000000000008 /* W12PrompterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterModel.swift; path = ../w12/src/W12PrompterModel.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000009 /* W12PrompterOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterOverlay.swift; path = ../w12/src/W12PrompterOverlay.swift; sourceTree = "<group>"; };
+ 		FA710000000000000000000A /* W12SquirrelGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12SquirrelGlue.swift; path = ../w12/src/W12SquirrelGlue.swift; sourceTree = "<group>"; };
++		FA7500000000000000000001 /* W20MemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20MemoryStore.swift; path = ../w20/src/W20MemoryStore.swift; sourceTree = "<group>"; };
++		FA7500000000000000000002 /* W20Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20Design.swift; path = ../w20/src/W20Design.swift; sourceTree = "<group>"; };
++		FA7500000000000000000003 /* W20ProposalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20ProposalModel.swift; path = ../w20/src/W20ProposalModel.swift; sourceTree = "<group>"; };
++		FA7500000000000000000004 /* W20ProposalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20ProposalCard.swift; path = ../w20/src/W20ProposalCard.swift; sourceTree = "<group>"; };
++		FA7500000000000000000005 /* W20MemoryPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20MemoryPanel.swift; path = ../w20/src/W20MemoryPanel.swift; sourceTree = "<group>"; };
++		FA7500000000000000000006 /* W20SquirrelGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20SquirrelGlue.swift; path = ../w20/src/W20SquirrelGlue.swift; sourceTree = "<group>"; };
++		FA7500000000000000000007 /* W20ProposalBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = W20ProposalBridge.h; path = ../w20/bridge/W20ProposalBridge.h; sourceTree = "<group>"; };
++		FA7500000000000000000008 /* W20ProposalBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = W20ProposalBridge.mm; path = ../w20/bridge/W20ProposalBridge.mm; sourceTree = "<group>"; };
++		FA7500000000000000000009 /* null_proposal_agent.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_proposal_agent.cc; path = ../../ai/backends/null/null_proposal_agent.cc; sourceTree = "<group>"; };
+ 		FA710000000000000000000B /* InteractionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionEvent.swift; path = ../../context/Sources/ContextCore/InteractionEvent.swift; sourceTree = "<group>"; };
+ 		FA710000000000000000000C /* InteractionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionStore.swift; path = ../../context/Sources/ContextCore/InteractionStore.swift; sourceTree = "<group>"; };
+ 		FA710000000000000000000D /* CircuitBreaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CircuitBreaker.swift; path = ../../context/Sources/ContextCore/CircuitBreaker.swift; sourceTree = "<group>"; };
+@@ -395,6 +412,15 @@
+ 				FA7100000000000000000008 /* W12PrompterModel.swift */,
+ 				FA7100000000000000000009 /* W12PrompterOverlay.swift */,
+ 				FA710000000000000000000A /* W12SquirrelGlue.swift */,
++				FA7500000000000000000001 /* W20MemoryStore.swift */,
++				FA7500000000000000000002 /* W20Design.swift */,
++				FA7500000000000000000003 /* W20ProposalModel.swift */,
++				FA7500000000000000000004 /* W20ProposalCard.swift */,
++				FA7500000000000000000005 /* W20MemoryPanel.swift */,
++				FA7500000000000000000006 /* W20SquirrelGlue.swift */,
++				FA7500000000000000000007 /* W20ProposalBridge.h */,
++				FA7500000000000000000008 /* W20ProposalBridge.mm */,
++				FA7500000000000000000009 /* null_proposal_agent.cc */,
+ 				FA710000000000000000000B /* InteractionEvent.swift */,
+ 				FA710000000000000000000C /* InteractionStore.swift */,
+ 				FA710000000000000000000D /* CircuitBreaker.swift */,
+@@ -681,6 +707,14 @@
+ 				FA7200000000000000000008 /* W12PrompterModel.swift in Sources */,
+ 				FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */,
+ 				FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */,
++				FA7600000000000000000001 /* W20MemoryStore.swift in Sources */,
++				FA7600000000000000000002 /* W20Design.swift in Sources */,
++				FA7600000000000000000003 /* W20ProposalModel.swift in Sources */,
++				FA7600000000000000000004 /* W20ProposalCard.swift in Sources */,
++				FA7600000000000000000005 /* W20MemoryPanel.swift in Sources */,
++				FA7600000000000000000006 /* W20SquirrelGlue.swift in Sources */,
++				FA7600000000000000000007 /* W20ProposalBridge.mm in Sources */,
++				FA7600000000000000000008 /* null_proposal_agent.cc in Sources */,
+ 				FA720000000000000000000B /* InteractionEvent.swift in Sources */,
+ 				FA720000000000000000000C /* InteractionStore.swift in Sources */,
+ 				FA720000000000000000000D /* CircuitBreaker.swift in Sources */,
+--- a/sources/Squirrel-Bridging-Header.h
++++ b/sources/Squirrel-Bridging-Header.h
+@@ -8,3 +8,7 @@
+ 
+ // W7 macos 集成：rescore 挂点桥（macos/w7/src/W7RescoreBridge.h）
+ #import "../../w7/src/W7RescoreBridge.h"
++
++// W20 proposal-ui：提案契约 v2 桥（C++ Null 提案桩 mine::ai::NullProposalAgent，
++// macos/w20/bridge/W20ProposalBridge.h）
++#import "../../w20/bridge/W20ProposalBridge.h"
+--- a/sources/SquirrelInputController.swift
++++ b/sources/SquirrelInputController.swift
+@@ -66,6 +66,13 @@
+     // W12: ⌥Esc 提词浮层唤起 / 浮层按键采纳（Tab/数字/Esc）/ C1 输入触发窗
+     //（macos/w12/src/W12SquirrelGlue.swift；消费的事件不进 rime、不给客户端）。
+     if W12SquirrelHooks.shared.intercept(event: event, controller: self, preedit: preedit, appId: currentApp) {
++      lastModifiers = modifiers
++      return true
++    }
++
++    // W20: ⌥M 记忆管理浮层（macos/w20/src/W20SquirrelGlue.swift；消费的事件不进 rime、
++    // 不给客户端）。菜单项入口见 menu() 的「记忆管理…（⌥M）」。
++    if W20SquirrelHooks.shared.intercept(event: event) {
+       lastModifiers = modifiers
+       return true
+     }
+@@ -279,6 +286,10 @@
+     wiki.target = self
+     let update = NSMenuItem(title: NSLocalizedString("Check for updates...", comment: "Menu item"), action: #selector(checkForUpdates), keyEquivalent: "")
+     update.target = self
++    // W20: 记忆管理界面入口（⌥M / 菜单项，docs/技术方案-v0.4.md §15.3）。
++    let memory = NSMenuItem(title: NSLocalizedString("记忆管理…", comment: "Menu item"), action: #selector(openMemoryPanel), keyEquivalent: "m")
++    memory.target = self
++    memory.keyEquivalentModifierMask = [.option]
+ 
+     let menu = NSMenu()
+     menu.addItem(deploy)
+@@ -287,8 +298,14 @@
+     menu.addItem(setting)
+     menu.addItem(wiki)
+     menu.addItem(update)
++    menu.addItem(memory)
+ 
+     return menu
++  }
++
++  // W20: 记忆管理浮层（W20MemoryPanel：时间线/搜索/编辑/删除/导出 + 采集状态/一键熔断）。
++  @objc func openMemoryPanel() {
++    W20SquirrelHooks.shared.togglePanel()
+   }
+ 
+   @objc func deploy() {
