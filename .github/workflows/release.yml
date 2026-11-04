@@ -1,0 +1,157 @@
+# W23 ci-release: Release 构建流——push tag v* / 手动触发，从仓库源码在 CI 编译并挂载 Release 资产。
+#
+# 流程：tests（复用 ci.yml，前置门）→ android（assembleRelease + 发布密钥签名）
+#      + macos（fetch-sources pin 克隆 → librime → Squirrel → zip）→ checksums（SHA256SUMS.txt）。
+# 资产命名：mine-input-v<版本>-android.apk / mine-input-v<版本>-macos-arm64.zip / SHA256SUMS.txt。
+# 规范化：permissions 最小化（顶层 contents: read，仅上传资产的 job 加 write）；actions pin commit SHA；
+# concurrency 同 ref 取消旧跑；gradle / brew 依赖缓存。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag（如 v0.1.0）'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # tag 触发 → ref 名；手动触发 → 输入的 version
+  TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version }}
+
+jobs:
+  tests:
+    name: tests (gate)
+    uses: ./.github/workflows/ci.yml
+
+  android:
+    name: android (assembleRelease)
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - name: Install SDK platform 37（compileSdk=37）
+        run: sdkmanager "platforms;android-37"
+      - name: gradle 缓存
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+      - name: fetch 依赖（sherpa-onnx AAR + jars + librime_jni.so，SHA256 钉死）
+        run: |
+          set -euo pipefail
+          bash android/fetch-deps.sh
+          bash android/fetch-rime-jni.sh
+      - name: 解码发布密钥（GitHub Secrets → 临时文件，不回显）
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_B64:?missing secret ANDROID_KEYSTORE_B64——按 docs/RELEASE-CHECKLIST 设置后重跑}"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          chmod 600 "$RUNNER_TEMP/release.keystore"
+          echo "MINE_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - name: assembleRelease（发布密钥签名）
+        working-directory: android
+        env:
+          MINE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          MINE_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+        run: ./gradlew assembleRelease
+      - name: 校验已签名并上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::未产出已签名 APK（若只有 app-release-unsigned.apk 说明签名配置未生效）"
+            ls android/app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          cp "$APK" "mine-input-${TAG}-android.apk"
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --verify-tag --title "$TAG" \
+                 --notes-file "docs/RELEASE-NOTES-${TAG}.md" 2>/dev/null \
+            || gh release create "$TAG" --verify-tag --title "$TAG" --notes "构建产物见附件"
+          gh release upload "$TAG" "mine-input-${TAG}-android.apk" --clobber
+
+  macos:
+    name: macos (librime + Squirrel)
+    needs: tests
+    runs-on: macos-14
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: brew 下载缓存
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('build/build-librime.sh', 'build/build-squirrel.sh') }}
+          restore-keys: |
+            brew-${{ runner.os }}-
+      - name: brew deps (boost, cmake)
+        run: brew install boost cmake
+      - name: fetch-sources（pin 的 commit 浅克隆 librime + squirrel）
+        run: bash build/fetch-sources.sh
+      - name: build-librime
+        run: bash build/build-librime.sh
+      - name: build-squirrel（release，arm64）
+        run: bash build/build-squirrel.sh
+      - name: 打包 zip（app + install.sh + uninstall.sh + 快速开始 README）
+        run: bash build/package-macos.sh "$TAG"
+      - name: 上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ZIP="build/dist/mine-input-${TAG}-macos-arm64.zip"
+          test -f "$ZIP" || { echo "::error::缺 $ZIP"; exit 1; }
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --verify-tag --title "$TAG" \
+                 --notes-file "docs/RELEASE-NOTES-${TAG}.md" 2>/dev/null \
+            || gh release create "$TAG" --verify-tag --title "$TAG" --notes "构建产物见附件"
+          gh release upload "$TAG" "$ZIP" --clobber
+
+  checksums:
+    name: checksums (SHA256SUMS.txt)
+    needs: [android, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: 汇总资产 SHA256 并上传 SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist && cd dist
+          gh release download "$TAG" --pattern 'mine-input-*'
+          ls -la
+          sha256sum "mine-input-${TAG}-android.apk" "mine-input-${TAG}-macos-arm64.zip" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" SHA256SUMS.txt --clobber

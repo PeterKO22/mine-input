@@ -1,0 +1,114 @@
+# W23 ci-release: 规范 CI——push/PR 触发的测试流（release.yml 以 workflow_call 复用作前置门）。
+# 覆盖：脚本语法（bash -n / py_compile）、C++（cmake+ctest 4 项）、
+#       Swift（context/ 两套 + macos/w20）、Android（assembleDebug + gradle 单测）。
+#
+# 规范化：permissions 最小化（contents: read）；actions 全部 pin 到 commit SHA（版本注释同行）；
+# concurrency 同 ref 取消旧跑；依赖缓存（gradle / ccache / brew）。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: scripts (bash -n / py_compile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: bash -n（全部 .sh 语法）
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r f; do bash -n "$f"; n=$((n+1)); done < <(git ls-files '*.sh')
+          echo "checked $n .sh files"
+      - name: py_compile（全部 .py 语法）
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r f; do python3 -m py_compile "$f"; n=$((n+1)); done < <(git ls-files '*.py')
+          echo "checked $n .py files"
+
+  cpp:
+    name: cpp (cmake + ctest 4)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: brew deps (ccache; cmake 镜像自带)
+        run: brew install ccache
+      - name: ccache 缓存
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+      - name: Configure + build (ccache)
+        env:
+          CCACHE_DIR: /Users/runner/Library/Caches/ccache
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/cc -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/cc -j 4
+      - name: ctest（4 项：test_null_backend/test_timeout/test_stream/test_proposal_v2）
+        run: |
+          set -euo pipefail
+          ctest --test-dir build/cc -N | tail -2
+          ctest --test-dir build/cc -N | grep -q 'Total Tests: 4' \
+            || { echo '::error::ctest 用例数不是 4——测试有增减请同步改本断言'; exit 1; }
+          ctest --test-dir build/cc --output-on-failure
+
+  swift:
+    name: swift (context 两套 + w20)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: context/（ContextCoreTests + MemoryCoreTests）
+        working-directory: context
+        run: swift build && swift test
+      - name: macos/w20（W20CoreTests）
+        working-directory: macos/w20
+        run: swift build && swift test
+
+  android:
+    name: android (assembleDebug + 单测)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - name: Install SDK platform 37（compileSdk=37）
+        run: sdkmanager "platforms;android-37"
+      - name: gradle 缓存
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+      - name: fetch 依赖（sherpa-onnx AAR + jars + librime_jni.so，SHA256 钉死）
+        run: |
+          set -euo pipefail
+          bash android/fetch-deps.sh
+          bash android/fetch-rime-jni.sh
+      - name: gradle 单测 + assembleDebug
+        working-directory: android
+        run: ./gradlew testDebugUnitTest assembleDebug

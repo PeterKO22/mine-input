@@ -6,6 +6,7 @@
 *.p12
 *.keystore
 *.jks
+.keystore/
 hub-secret
 # 2) Hub 运行数据（hub.db / hub-secret / 备份落卷目录，绝不入库）
 hub-data/

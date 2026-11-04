@@ -4,6 +4,21 @@ plugins {
     id("com.android.application")
 }
 
+// W23 ci-release: release 签名——keystore/口令/别名全部来自环境变量（CI 由 GitHub Secrets
+// 注入，本地不落任何密钥到构建脚本）。优雅降级：env 缺失时打警告并产出未签名 APK
+// （app-release-unsigned.apk），不阻断本地调试构建；发布流水线另有硬校验（release.yml）。
+val ksFile = System.getenv("MINE_KEYSTORE_FILE")
+val ksPass = System.getenv("MINE_KEYSTORE_PASSWORD")
+val ksAlias = System.getenv("MINE_KEYSTORE_ALIAS")
+val releaseSigningReady =
+    !ksFile.isNullOrBlank() && !ksPass.isNullOrBlank() && !ksAlias.isNullOrBlank()
+if (!releaseSigningReady) {
+    logger.warn(
+        "W23: 未配置 release 签名（MINE_KEYSTORE_FILE/MINE_KEYSTORE_PASSWORD/MINE_KEYSTORE_ALIAS " +
+            "任一缺失）——本次 release 构建将产出未签名 APK"
+    )
+}
+
 android {
     namespace = "com.mineinput.ime"
     compileSdk = 37
@@ -12,13 +27,26 @@ android {
         applicationId = "com.mineinput.ime"
         minSdk = 29
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.4.0-w16"
+        versionCode = 5
+        versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) {
+            create("release") {
+                storeFile = file(ksFile!!)
+                storePassword = ksPass
+                keyAlias = ksAlias
+                keyPassword = ksPass
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // 优雅降级：签名配置缺失时为 null → 产出 app-release-unsigned.apk
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

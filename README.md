@@ -1,5 +1,8 @@
 # 提炼输入法（Mine Input）
 
+[![CI](https://github.com/PeterKO22/mine-input/actions/workflows/ci.yml/badge.svg)](https://github.com/PeterKO22/mine-input/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/PeterKO22/mine-input)](https://github.com/PeterKO22/mine-input/releases/latest)
+
 > 一套 **五笔 86 + 拼音混合、按住即说** 的输入法，跑在你的 **macOS** 与 **Android** 上；
 > 背后是**你自己的 AI**——懂你的上下文，像动态提词器一样跟着你的语音走；
 > 习惯数据全端同步，**隐私不出你自己的地盘**。
