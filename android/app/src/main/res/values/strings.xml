@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">mine-input</string>
-    <string name="ime_name">mine-input 五笔·拼音</string>
+    <!-- W18 产品命名（D15）：中文名「提炼输入法」，英文名 "Mine Input"（values-en/），不带 dev 后缀 -->
+    <string name="app_name">提炼输入法</string>
+    <string name="ime_name">提炼输入法</string>
     <string name="subtype_label">五笔86+拼音混输（骨架）</string>
 </resources>

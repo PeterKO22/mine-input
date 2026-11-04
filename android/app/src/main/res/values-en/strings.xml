@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- W18 产品命名（D15）：English name "Mine Input" -->
+    <string name="app_name">Mine Input</string>
+    <string name="ime_name">Mine Input</string>
+    <string name="subtype_label">Wubi 86 + Pinyin mixed (skeleton)</string>
+</resources>

@@ -106,7 +106,7 @@ index df13876..b9e515b 100644
  	<string>6.0</string>
  	<key>CFBundleName</key>
 -	<string>Squirrel</string>
-+	<string>Squirrel Dev</string>
++	<string>Mine Input</string>
  	<key>CFBundlePackageType</key>
  	<string>APPL</string>
  	<key>CFBundleSignature</key>
@@ -286,3 +286,134 @@ index ed2aef2..4eadc9e 100644
        object: status
      )
    }
+diff --git a/resources/InfoPlist.xcstrings b/resources/InfoPlist.xcstrings
+index e304fbe..47496de 100644
+--- a/resources/InfoPlist.xcstrings
++++ b/resources/InfoPlist.xcstrings
+@@ -7,19 +7,19 @@
+         "en" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "Squirrel"
++            "value" : "Mine Input"
+           }
+         },
+         "zh-Hans" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠须管"
++            "value" : "提炼输入法"
+           }
+         },
+         "zh-Hant" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠鬚管"
++            "value" : "提炼输入法"
+           }
+         }
+       }
+@@ -31,88 +31,88 @@
+         "en" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "Squirrel"
++            "value" : "Mine Input"
+           }
+         },
+         "zh-Hans" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠须管"
++            "value" : "提炼输入法"
+           }
+         },
+         "zh-Hant" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠鬚管"
++            "value" : "提炼输入法"
+           }
+         }
+       }
+     },
+-    "im.rime.inputmethod.Squirrel" : {
++    "im.rime.inputmethod.Squirrel.dev" : {
+       "extractionState" : "manual",
+       "localizations" : {
+         "en" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "Squirrel"
++            "value" : "Mine Input"
+           }
+         },
+         "zh-Hans" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠须管"
++            "value" : "提炼输入法"
+           }
+         },
+         "zh-Hant" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠鬚管"
++            "value" : "提炼输入法"
+           }
+         }
+       }
+     },
+-    "im.rime.inputmethod.Squirrel.Hans" : {
++    "im.rime.inputmethod.Squirrel.dev.Hans" : {
+       "extractionState" : "manual",
+       "localizations" : {
+         "en" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "Squirrel - Simplified"
++            "value" : "Mine Input"
+           }
+         },
+         "zh-Hans" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠须管"
++            "value" : "提炼输入法"
+           }
+         },
+         "zh-Hant" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠须管"
++            "value" : "提炼输入法"
+           }
+         }
+       }
+     },
+-    "im.rime.inputmethod.Squirrel.Hant" : {
++    "im.rime.inputmethod.Squirrel.dev.Hant" : {
+       "extractionState" : "manual",
+       "localizations" : {
+         "en" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "Squirrel - Traditional"
++            "value" : "Mine Input"
+           }
+         },
+         "zh-Hans" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠鬚管"
++            "value" : "提炼输入法"
+           }
+         },
+         "zh-Hant" : {
+           "stringUnit" : {
+             "state" : "translated",
+-            "value" : "鼠鬚管"
++            "value" : "提炼输入法"
+           }
+         }
+       }
