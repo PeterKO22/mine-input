@@ -39,6 +39,14 @@ object SyncManager {
 
     private fun api() = HubApi(pairing.baseUrl, pairing.token)
 
+    // ---- W24：密码框隐私（Mac C1 设计同步）——焦点进入密码框 → 一切采集/上报暂停 ----
+
+    @Volatile
+    var collectionPaused = false
+
+    @Volatile
+    var collectionPauseReason = ""
+
     // ---- 门控 ----
 
     fun fuseBlown(): Boolean = settings.fuseBlown
@@ -58,6 +66,11 @@ object SyncManager {
 
     /** 交互事件入队（静默），随后尝试补传。同意撤回/熔断 → 直接拒收（不再上报）。 */
     fun recordInteraction(ev: JSONObject): String {
+        if (collectionPaused) {
+            // W24：密码框等隐私焦点 → 采集闸关死（含 voice_session/candidate_pick 一切事件）
+            Log.i("W24", "COLLECT_BLOCKED|reason=$collectionPauseReason|kind=${ev.optString("kind")}")
+            return "blocked:$collectionPauseReason"
+        }
         if (!canUpload() || !consent.c0) {
             val reason = if (blockReason().isNotEmpty()) blockReason() else "no-c0-consent"
             Log.i(TAG, "UPLOAD_BLOCKED kind=${ev.optString("kind")} reason=$reason")

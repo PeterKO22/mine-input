@@ -20,6 +20,8 @@ class KeyboardView constructor(
 
     interface Listener {
         fun onLetter(ch: Char)
+        fun onDirect(ch: Char) // W24：数字/符号 ASCII 直输（英文态=commit_code 语义）
+        fun onModeToggle() // W24：工具栏「中/EN」切换键（持久状态）
         fun onDelete()
         fun onEnter()
         fun onSpace()
@@ -36,7 +38,7 @@ class KeyboardView constructor(
 
     var listener: Listener? = null
 
-    private enum class Kind { CHAR, ENTER, PTT, SHIFT, DELETE, SPACE, SYMBOL }
+    private enum class Kind { CHAR, DIRECT, ENTER, PTT, SHIFT, DELETE, SPACE, SYMBOL }
 
     private data class KeyDef(
         val label: String,
@@ -46,7 +48,8 @@ class KeyboardView constructor(
 
     private class KeyRect(val def: KeyDef, val rect: RectF)
 
-    private val rows: List<List<KeyDef>> = listOf(
+    /** W24：?123 符号面板（数字/符号 Kind.DIRECT 直输；ABC 返回）。行数=4，字键几何不变（W14 手势坐标依赖）。 */
+    private val letterRows: List<List<KeyDef>> = listOf(
         "qwertyuiop".map { KeyDef(it.toString()) },
         "asdfghjkl".map { KeyDef(it.toString()) },
         listOf(KeyDef("⇧", Kind.SHIFT, 1.4f)) +
@@ -62,16 +65,36 @@ class KeyboardView constructor(
         ),
     )
 
+    private val symbolRows: List<List<KeyDef>> = listOf(
+        "1234567890".map { KeyDef(it.toString(), Kind.DIRECT) },
+        "@#\$%&-+()/".map { KeyDef(it.toString(), Kind.DIRECT) },
+        listOf(KeyDef("⌫", Kind.DELETE, 1.4f)) +
+            "*\"'`:;!?_~".map { KeyDef(it.toString(), Kind.DIRECT) },
+        listOf(
+            KeyDef("ABC", Kind.SYMBOL, 1.4f),
+            KeyDef("，"),
+            KeyDef("空格", Kind.SPACE, 3.2f),
+            KeyDef("。"),
+            KeyDef("⏎", Kind.ENTER, 1.4f),
+        ),
+    )
+
+    private var symbolMode = false // W24：?123 面板开关
+    private val rows: List<List<KeyDef>> get() = if (symbolMode) symbolRows else letterRows
+
     // 状态（由 MineImeService 驱动）
     private var composing: String = ""
     private var candidates: List<String> = emptyList()
     private var statusLine: String = ""
     private var stateBits: List<Bit> = emptyList()
     private var shiftOn: Boolean = false
+    private var imeEn: Boolean = false // W24：EN 英文直输态（持久）
+    private var aiFlags: List<Boolean> = emptyList() // W24：AI 智能候选组标记（与 candidates 对齐）
 
     private val keyRects = mutableListOf<KeyRect>()
     private val candidateRects = mutableListOf<RectF>()
     private var gearRect: RectF = RectF() // W11 设置入口命中区
+    private var modeChipRect: RectF = RectF() // W24 中/EN 切换键命中区（工具栏）
     private var pressed: KeyRect? = null
     private var pttHeld = false
     private var pttOverlayActive = false // W14：听写中 → 候选区显示滚动转写
@@ -109,14 +132,28 @@ class KeyboardView constructor(
         statusLine: String,
         bits: List<Bit> = emptyList(),
         error: Boolean = false, // W14：失败提示（如「请重说」）红字显示
+        enMode: Boolean = false, // W24：EN 英文直输态
+        aiFlags: List<Boolean> = emptyList(), // W24：AI 智能候选组标记
     ) {
         this.composing = composing
         this.candidates = candidates
         this.statusLine = statusLine
         this.stateBits = bits
         this.statusError = error
+        this.imeEn = enMode
+        this.aiFlags = aiFlags
         if (width > 0) layoutKeys(width) // 候选数量变化 → 重排候选栏命中区
         invalidate()
+    }
+
+    /** W24：中/EN 切换键屏幕坐标（e2e 真实点按用）。 */
+    fun modeChipScreenBounds(): RectF {
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        return RectF(
+            modeChipRect.left + loc[0], modeChipRect.top + loc[1],
+            modeChipRect.right + loc[0], modeChipRect.bottom + loc[1],
+        )
     }
 
     /** W14：PTT 候选区滚动转写覆盖层（听写中候选栏显示实时转写，随说话滚动刷新）。 */
@@ -152,8 +189,9 @@ class KeyboardView constructor(
             }
         }
         y += candidateHeight + keyGap
-        // W11：状态条右侧「⚙ 设置」入口命中区 + 状态位
+        // W11：状态条右侧「⚙ 设置」入口命中区 + 状态位；W24：「中/EN」切换键在设置左侧
         gearRect = RectF(w - keyMargin - dp(64f), y, w - keyMargin, y + statusHeight)
+        modeChipRect = RectF(gearRect.left - dp(4f) - dp(48f), y, gearRect.left - dp(4f), y + statusHeight)
         y += statusHeight + keyGap
         for (row in rows) {
             val totalWeight = row.sumOf { it.weight.toDouble() }.toFloat()
@@ -193,15 +231,24 @@ class KeyboardView constructor(
             canvas.drawText(show, strip.left + dp(8f), cy, paintText)
             paintText.textAlign = Paint.Align.CENTER
         } else {
-        // 候选栏（M1 映射：序号 gold mono，当前候选金填充微光）
+        // 候选栏（M1 映射：序号 gold mono，当前候选金填充微光；W24：AI 智能候选组=cyan 描边玻璃卡 + 「AI」角标）
         for ((i, rect) in candidateRects.withIndex()) {
             val label = candidates.getOrNull(i) ?: continue
             val selected = i == 0
-            paintFill.color = if (selected) DesignTokens.gold else DesignTokens.card
+            val ai = aiFlags.getOrNull(i) == true
+            paintFill.color = when {
+                selected -> DesignTokens.gold
+                ai -> (DesignTokens.card and 0x00FFFFFF) or (0x80 shl 24) // 玻璃卡（半透明）
+                else -> DesignTokens.card
+            }
             paintFill.setShadowLayer(if (selected) dp(6f) else 0f, 0f, 0f, DesignTokens.gold)
             canvas.drawRoundRect(rect, radius, radius, paintFill)
             paintFill.setShadowLayer(0f, 0f, 0f, 0)
-            paintStroke.color = if (selected) DesignTokens.gold else DesignTokens.stroke
+            paintStroke.color = when {
+                selected -> DesignTokens.gold
+                ai -> DesignTokens.cyan // AI 智能组：cyan 描边与五笔/拼音组区分
+                else -> DesignTokens.stroke
+            }
             canvas.drawRoundRect(rect, radius, radius, paintStroke)
             paintTextMono.color = if (selected) DesignTokens.bg else DesignTokens.gold
             paintTextMono.textSize = dp(11f)
@@ -211,6 +258,13 @@ class KeyboardView constructor(
             paintText.color = if (selected) DesignTokens.bg else DesignTokens.textBody
             paintText.textSize = dp(13f)
             canvas.drawText(label, (rect.left + rect.right) / 2 + dp(8f), cy, paintText)
+            if (ai) {
+                // 「AI」角标（右上角，cyan mono）
+                paintTextMono.color = if (selected) DesignTokens.bg else DesignTokens.cyan
+                paintTextMono.textSize = dp(8f)
+                canvas.drawText("AI", rect.right - dp(11f), rect.top + dp(11f), paintTextMono)
+                paintTextMono.textSize = dp(11f)
+            }
         }
         }
 
@@ -230,9 +284,9 @@ class KeyboardView constructor(
             paintTextMono,
         )
 
-        // W11 状态位（FR8 采集状态常显）：C0/C2/HW/熔断/Hub 小胶囊
+        // W11 状态位（FR8 采集状态常显）：C0/C2/HW/熔断/Hub 小胶囊（从「中/EN」键左侧起排）
         paintTextMono.textSize = dp(9f)
-        var bx = gearRect.left - dp(6f)
+        var bx = modeChipRect.left - dp(6f)
         for (bit in stateBits.asReversed()) {
             val label = if (bit.active) "${bit.label}✓" else "${bit.label}·"
             val tw = paintTextMono.measureText(label)
@@ -246,6 +300,20 @@ class KeyboardView constructor(
             canvas.drawText(label, rect.centerX(), statusY - (paintTextMono.descent() + paintTextMono.ascent()) / 2, paintTextMono)
             bx = rect.left - dp(4f)
         }
+
+        // W24 中/EN 切换键（工具栏）：EN 态金实心，中文态卡片描边
+        paintFill.color = if (imeEn) DesignTokens.gold else DesignTokens.card
+        canvas.drawRoundRect(modeChipRect, dp(4f), dp(4f), paintFill)
+        paintStroke.color = if (imeEn) DesignTokens.gold else DesignTokens.stroke
+        canvas.drawRoundRect(modeChipRect, dp(4f), dp(4f), paintStroke)
+        paintTextMono.color = if (imeEn) DesignTokens.bg else DesignTokens.textBody
+        paintTextMono.textSize = dp(11f)
+        canvas.drawText(
+            if (imeEn) "EN" else "中",
+            modeChipRect.centerX(),
+            statusY - (paintTextMono.descent() + paintTextMono.ascent()) / 2,
+            paintTextMono,
+        )
 
         // W11 设置入口 chip（「⚙ 设置」）
         paintFill.color = DesignTokens.card
@@ -288,7 +356,7 @@ class KeyboardView constructor(
         paintText.color = when {
             isPtt && pttHeld -> DesignTokens.bg
             isPtt -> DesignTokens.bg
-            kr.def.kind == Kind.CHAR -> DesignTokens.textBody
+            kr.def.kind == Kind.CHAR || kr.def.kind == Kind.DIRECT -> DesignTokens.textBody
             else -> DesignTokens.textTitle
         }
         paintText.textSize = if (isPtt) dp(13f) else dp(16f)
@@ -299,6 +367,11 @@ class KeyboardView constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // W24：状态条「中/EN」切换键
+                if (modeChipRect.contains(event.x, event.y)) {
+                    listener?.onModeToggle()
+                    return true
+                }
                 // W11：状态条「⚙ 设置」入口
                 if (gearRect.contains(event.x, event.y)) {
                     listener?.onSettings()
@@ -346,10 +419,14 @@ class KeyboardView constructor(
                             }
                             listener?.onLetter(ch)
                         }
+                        Kind.DIRECT -> listener?.onDirect(kr.def.label[0]) // W24：数字/符号直输
                         Kind.DELETE -> listener?.onDelete()
                         Kind.ENTER -> listener?.onEnter()
                         Kind.SPACE -> listener?.onSpace()
-                        Kind.SYMBOL -> listener?.onSymbol()
+                        Kind.SYMBOL -> { // W24：?123 ↔ ABC 面板切换
+                            symbolMode = !symbolMode
+                            if (width > 0) layoutKeys(width)
+                        }
                         Kind.SHIFT -> shiftOn = !shiftOn
                         Kind.PTT -> {}
                     }

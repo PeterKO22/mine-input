@@ -116,6 +116,14 @@ object Prefs {
             get() = sp.getBoolean("empty_code_commit", false)
             set(v) = sp.edit().putBoolean("empty_code_commit", v).apply()
 
+        // W24：中/EN 输入模式（持久状态：跨会话保留，密码框自动 EN 不落盘）
+        // commit() 同步落盘：force-stop 硬杀进程时 apply() 的异步写会丢（W24 e2e 实测）
+        var imeMode: String
+            get() = sp.getString("ime_mode", "cn") ?: "cn"
+            set(v) {
+                sp.edit().putString("ime_mode", v).commit()
+            }
+
         // 自适应学习（L1 词典 / L2 词频习惯）
         var learnL1: Boolean
             get() = sp.getBoolean("learn_l1", true)

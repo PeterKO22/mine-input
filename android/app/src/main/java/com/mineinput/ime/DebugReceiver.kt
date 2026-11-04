@@ -21,6 +21,9 @@ import org.json.JSONObject
  *                                 见 voice/W14Debug.kt；结果打 tag=W14 供 w14-e2e 断言）
  *   w16_*                       → W16 混输引擎钩子（w16_startup/w16_status/w16_seq/w16_commit/
  *                                 w16_learn/w16_bench，见 engine/W16Debug.kt；结果打 tag=W16 供 w16-e2e 断言）
+ *   w24_*                       → W24 中/EN 直输与密码框隐私钩子（w24_status/w24_mode/w24_type/
+ *                                 w24_pick/w24_fieldtext/w24_layout/w24_collect_probe/w24_aimark，
+ *                                 见 W24Debug.kt；结果打 tag=W24 供 w24-e2e 断言）
  * 所有结果打 logcat（tag=W11 / W14 / W16），供 w11-e2e.sh / w14-e2e / w16-e2e 抓取断言。
  */
 class DebugReceiver : BroadcastReceiver() {
@@ -39,6 +42,11 @@ class DebugReceiver : BroadcastReceiver() {
         if (cmd.startsWith("w16_")) {
             // W16 混输引擎钩子（键序列→候选/上屏/词频/延迟断言），实现见 engine/W16Debug.kt
             com.mineinput.ime.engine.W16Debug.handle(ctx, intent)
+            return
+        }
+        if (cmd.startsWith("w24_")) {
+            // W24 中/EN 直输 + 密码框隐私钩子（模式/按键路径/采集闸断言），实现见 W24Debug.kt
+            com.mineinput.ime.W24Debug.handle(ctx, intent)
             return
         }
         val pending = goAsync()

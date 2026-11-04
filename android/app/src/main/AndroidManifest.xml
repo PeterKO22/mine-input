@@ -35,6 +35,11 @@
             android:name=".SectionActivity"
             android:exported="true" />
 
+        <!-- W24：e2e 探针（真实普通框/密码框，仅 debug 包可用，release 自杀） -->
+        <activity
+            android:name=".W24ProbeActivity"
+            android:exported="true" />
+
         <!-- W11：端到端调试通道（仅 debug 包响应，release 忽略） -->
         <receiver
             android:name=".DebugReceiver"
