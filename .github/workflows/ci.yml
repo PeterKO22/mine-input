@@ -96,8 +96,8 @@ jobs:
         with:
           # W23: 默认 packages 含已下架的 'tools' 包（sdkmanager 报 Failed to find package）
           packages: platform-tools
-      - name: Install SDK platform 37（compileSdk=37）
-        run: sdkmanager "platforms;android-37"
+      - name: Install SDK platform 36（compileSdk=36；稳定渠道，37 无此包）
+        run: sdkmanager "platforms;android-36"
       - name: gradle 缓存
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:

@@ -153,17 +153,19 @@ final class ContextCoreTests: XCTestCase {
     func testNullBackendStreamSemantics() async {
         let backend = NullSuggestBackend()
         let ctx = SuggestContext(beforeCursor: "今天开会")
-        var statuses: [StreamStatus] = []
-        var candidates: [Candidate] = []
+        // W23：onUpdate 在并发闭包内执行，不得 mutate 捕获的 var（新版 Swift 硬错误）——
+        // 收集改走线程安全盒子（与 contextctl 的 RoundState 同款 NSLock 模式）。
+        let log = StreamLog()
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             Task {
                 await backend.suggest(ctx: ctx, timeout: 0.8) { upd in
-                    statuses.append(upd.status)
-                    candidates.append(contentsOf: upd.candidates)
+                    log.append(upd)
                 }
                 cont.resume()
             }
         }
+        let statuses = log.statuses
+        let candidates = log.candidates
         // 先若干 kDelta，后恰好一次终止（kDone）
         XCTAssertEqual(statuses.last, .kDone)
         XCTAssertEqual(statuses.filter { $0 == .kDone }.count, 1)
@@ -179,5 +181,28 @@ final class ContextCoreTests: XCTestCase {
         XCTAssertEqual(EventKind.voiceSession.rawValue, "voice_session")
         XCTAssertEqual(EventKind.candidatePick.rawValue, "candidate_pick")
         XCTAssertEqual(EventKind.suggestionFeedback.rawValue, "suggestion_feedback")
+    }
+}
+
+// W23：线程安全收集盒——onUpdate 回调在并发闭包执行，不能 mutate 被捕获的 var。
+private final class StreamLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _statuses: [StreamStatus] = []
+    private var _candidates: [Candidate] = []
+
+    func append(_ upd: SuggestUpdate) {
+        lock.lock(); defer { lock.unlock() }
+        _statuses.append(upd.status)
+        _candidates.append(contentsOf: upd.candidates)
+    }
+
+    var statuses: [StreamStatus] {
+        lock.lock(); defer { lock.unlock() }
+        return _statuses
+    }
+
+    var candidates: [Candidate] {
+        lock.lock(); defer { lock.unlock() }
+        return _candidates
     }
 }

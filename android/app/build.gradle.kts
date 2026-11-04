@@ -21,12 +21,14 @@ if (!releaseSigningReady) {
 
 android {
     namespace = "com.mineinput.ime"
-    compileSdk = 37
+    // W23: 37→36——runner 稳定渠道 sdkmanager 无 platforms;android-37（Failed to find package），
+    // 36 为稳定渠道可装版本；本项目 API 面（minSdk 29）不依赖 37 独有符号。
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.mineinput.ime"
         minSdk = 29
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 5
         versionName = "0.1.0"
     }
