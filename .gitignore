@@ -1,0 +1,20 @@
+# W21 安全审计：全局防误入库（.gitignore 完整性核查补口）
+#
+# 1) 密钥 / 凭据（纵深防御：hub/tls/certs/ 另有目录级 ignore 挡私钥）
+*.key
+*.pem
+*.p12
+*.keystore
+*.jks
+hub-secret
+# 2) Hub 运行数据（hub.db / hub-secret / 备份落卷目录，绝不入库）
+hub-data/
+backups/
+# 3) 外部克隆与构建产物（fetch/build 脚本可复现）
+core/
+macos/squirrel/
+macos/w20/.build/
+macos/w20/.demo/
+macos/w18/tis-probe
+# 4) 系统杂物
+.DS_Store

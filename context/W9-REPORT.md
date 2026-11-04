@@ -49,11 +49,11 @@ Build complete! (0.94秒)
 
 === 1. C0 采集器：frontmost 应用（NSWorkspace）+ 采集状态 ===
 store ready: .demo/interaction.db
-device_id=my-mac breaker=off
+device_id=mac-you breaker=off
 frontmost_app: loginwindow
 frontmost_app_id: com.apple.loginwindow
 db: .demo/interaction.db
-device_id: my-mac
+device_id: mac-you
 frontmost_app: loginwindow (com.apple.loginwindow)
 breaker: off
 clipboard_collection: OFF（默认关）
@@ -110,20 +110,20 @@ $ sqlite3 .demo/interaction.db "SELECT COUNT(*) FROM events"
 
 === 4. 可导（JSONL / CSV） ===
 $ contextctl log export --format jsonl
-{"app_id":"com.apple.loginwindow","device_id":"my-mac","kind":"key_session","text_in":"留存默认关","text_out":"","ts":1793730973231}
-{"app_id":"com.apple.loginwindow","device_id":"my-mac","kind":"suggestion_feedback","suggestion_shown":3,"suggestion_taken":1,"text_in":"今天开会","text_out":"今天开会——好的，我稍后处理","ts":1793730973209}
-{"app_id":"com.apple.TextEdit","device_id":"my-mac","keystroke_cadence":2.8,"kind":"candidate_pick","text_in":"zni","text_out":"智能","ts":1793730973201}
-{"app_id":"com.apple.TextEdit","device_id":"my-mac","kind":"voice_session","suggestion_shown":3,"suggestion_taken":1,"text_in":"今天开会","text_out":"今天开会。","ts":1793730973192}
-{"app_id":"com.apple.TextEdit","device_id":"my-mac","keystroke_cadence":3.1,"kind":"key_session","text_in":"shijie","text_out":"世界","ts":1793730973184}
-{"app_id":"com.apple.TextEdit","device_id":"my-mac","keystroke_cadence":3.2,"kind":"key_session","suggestion_shown":2,"suggestion_taken":1,"text_in":"ni hao","text_out":"你好","ts":1793730973174}
+{"app_id":"com.apple.loginwindow","device_id":"mac-you","kind":"key_session","text_in":"留存默认关","text_out":"","ts":1793730973231}
+{"app_id":"com.apple.loginwindow","device_id":"mac-you","kind":"suggestion_feedback","suggestion_shown":3,"suggestion_taken":1,"text_in":"今天开会","text_out":"今天开会——好的，我稍后处理","ts":1793730973209}
+{"app_id":"com.apple.TextEdit","device_id":"mac-you","keystroke_cadence":2.8,"kind":"candidate_pick","text_in":"zni","text_out":"智能","ts":1793730973201}
+{"app_id":"com.apple.TextEdit","device_id":"mac-you","kind":"voice_session","suggestion_shown":3,"suggestion_taken":1,"text_in":"今天开会","text_out":"今天开会。","ts":1793730973192}
+{"app_id":"com.apple.TextEdit","device_id":"mac-you","keystroke_cadence":3.1,"kind":"key_session","text_in":"shijie","text_out":"世界","ts":1793730973184}
+{"app_id":"com.apple.TextEdit","device_id":"mac-you","keystroke_cadence":3.2,"kind":"key_session","suggestion_shown":2,"suggestion_taken":1,"text_in":"ni hao","text_out":"你好","ts":1793730973174}
 $ contextctl log export --format csv
 ts,device_id,app_id,kind,text_in,text_out,ocr_digest,asr_digest,keystroke_cadence,suggestion_shown,suggestion_taken
-1793730973231,my-mac,com.apple.loginwindow,key_session,留存默认关,,,,,,
-1793730973209,my-mac,com.apple.loginwindow,suggestion_feedback,今天开会,今天开会——好的，我稍后处理,,,,3,1
-1793730973201,my-mac,com.apple.TextEdit,candidate_pick,zni,智能,,,2.8,,
-1793730973192,my-mac,com.apple.TextEdit,voice_session,今天开会,今天开会。,,,,3,1
-1793730973184,my-mac,com.apple.TextEdit,key_session,shijie,世界,,,3.1,,
-1793730973174,my-mac,com.apple.TextEdit,key_session,ni hao,你好,,,3.2,2,1
+1793730973231,mac-you,com.apple.loginwindow,key_session,留存默认关,,,,,,
+1793730973209,mac-you,com.apple.loginwindow,suggestion_feedback,今天开会,今天开会——好的，我稍后处理,,,,3,1
+1793730973201,mac-you,com.apple.TextEdit,candidate_pick,zni,智能,,,2.8,,
+1793730973192,mac-you,com.apple.TextEdit,voice_session,今天开会,今天开会。,,,,3,1
+1793730973184,mac-you,com.apple.TextEdit,key_session,shijie,世界,,,3.1,,
+1793730973174,mac-you,com.apple.TextEdit,key_session,ni hao,你好,,,3.2,2,1
 
 === 5. suggest 客户端：Hub /v1/suggest SSE 流式刷新（localhost:8088） ===
 hub-token: len=83（register 忽略 409 → token）

@@ -18,8 +18,10 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-ADB = "/Users/you/Library/Android/sdk/platform-tools/adb"
+ADB = os.environ.get("ADB") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
 PKG = "com.mineinput.ime"
+APK = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                   "app", "build", "outputs", "apk", "debug", "app-debug.apk")
 # 配对码 → 确定性凭据（同码=同 Hub 账号）。Hub 服务端状态跨运行持久，
 # 固定码会撞历史累计计数器（3+4=7 断言失去意义）→ 每次运行随机码=全新账号，
 # 与 W8 sync-demo 每次随机账号（w8demo-A-<rand>）同一做法。
@@ -128,8 +130,7 @@ def docker_push_ingest_counts():
 def main():
     step("0. 环境：安装 APK + 清数据（首次启动）")
     sh([ADB, "logcat", "-c"])
-    out = sh([ADB, "install", "-r",
-              "/Users/you/AITECreate/mine-input/android/app/build/outputs/apk/debug/app-debug.apk"])
+    out = sh([ADB, "install", "-r", APK])
     check("adb install", "Success" in out, out.strip().splitlines()[-1] if out.strip() else "")
     sh([ADB, "shell", "pm", "clear", PKG])
     sh([ADB, "shell", "am", "start", "-n", f"{PKG}/.MainActivity"])

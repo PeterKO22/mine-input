@@ -363,12 +363,12 @@ final class MemoryCoreTests: XCTestCase {
             myReply: MyReply(text: "今天开会。", mode: .voice),
             meta: Meta(fromSuggestion: "prop-1", confidence: 0.0, sessionId: "s-1"),
             consent: .c1)
-        let line = MemorySync.ingestJSONLLine(from: rec, deviceId: "mac-aitebot")
+        let line = MemorySync.ingestJSONLLine(from: rec, deviceId: "mac-you")
 
         // W8 同构事件体 = hub /v1/ingest IngestIn = sdk ser::event_to_json 字段
         let ev = try JSONDecoder().decode(InteractionEvent.self, from: line.data(using: .utf8)!)
         XCTAssertEqual(ev.ts, 1_793_730_973_174)
-        XCTAssertEqual(ev.deviceId, "mac-aitebot")
+        XCTAssertEqual(ev.deviceId, "mac-you")
         XCTAssertEqual(ev.appId, "com.apple.TextEdit")
         XCTAssertEqual(ev.kind, .voiceSession) // mode=voice → voice_session（hub EventKind 枚举）
         XCTAssertEqual(ev.textIn, "今天开会")

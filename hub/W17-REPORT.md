@@ -154,7 +154,7 @@ counts.txt: OK
 
 ```text
 $ ./tls/gen-certs.sh
-[gen] SAN=DNS:localhost,DNS:hub,DNS:host.docker.internal,IP:127.0.0.1,DNS:my-mac,DNS:my-mac.local
+[gen] SAN=DNS:localhost,DNS:hub,DNS:host.docker.internal,IP:127.0.0.1,DNS:your-mac,DNS:your-mac.local
 server.crt: OK                                    # openssl verify 链验证
 [ok] CA   SHA256 Fingerprint=56:44:8F:6A:...
 [ok] server SAN: DNS:localhost, DNS:hub, DNS:host.docker.internal, IP Address:127.0.0.1, ...

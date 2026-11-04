@@ -1,5 +1,6 @@
 /* Shift 中/英切换探针 v3：RIME_STRUCT 即声明，模拟真实前端 down/up 序列 */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <rime_api.h>
 
@@ -23,10 +24,14 @@ static void press_shift(RimeSessionId s) {
 }
 
 int main(void) {
+  /* W21 脱敏：RIME 用户目录取 $HOME（不再硬编码个人路径） */
+  static char rime_dir[512];
+  snprintf(rime_dir, sizeof rime_dir, "%s/Library/Rime-mine-dev",
+           getenv("HOME") ? getenv("HOME") : ".");
   rime = rime_get_api();
   RIME_STRUCT(RimeTraits, traits);
-  traits.shared_data_dir = "/Users/you/Library/Rime-mine-dev";
-  traits.user_data_dir = "/Users/you/Library/Rime-mine-dev";
+  traits.shared_data_dir = rime_dir;
+  traits.user_data_dir = rime_dir;
   traits.distribution_name = "MineInputProbe";
   traits.distribution_code_name = "mineinput_probe";
   traits.distribution_version = "0.1";

@@ -24,7 +24,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-ADB = "/Users/you/Library/Android/sdk/platform-tools/adb"
+ADB = os.environ.get("ADB") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
 DEV = "emulator-5554"
 PKG = "com.mineinput.ime"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

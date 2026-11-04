@@ -297,7 +297,7 @@ def m7():
             x+=304
         sec(o,292,"Hub 连接")
         o.append(text(300,326,"Hub 地址",14,TXT_BODY,500))
-        o.append(rect(560,306,420,32,8,CARD,STROKE,1)); o.append(text(576,327,"http://hub.local:8720",13,TXT_BODY,400,"start",mono=True))
+        o.append(rect(560,306,420,32,8,CARD,STROKE,1)); o.append(text(576,327,"http://your-hub.local:8720",13,TXT_BODY,400,"start",mono=True))
         o.append(rect(996,306,110,32,8,BG,STROKE,1)); o.append(text(1051,327,"测试连接",13,TXT_BODY,500,"middle"))
         c2,w=chip(1120,309,"已连接 · 32ms",GREEN_TINT,GREEN,11,26,mono=True); o.append(c2)
         sec(o,392,"模型")
