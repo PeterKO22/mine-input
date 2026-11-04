@@ -19,7 +19,7 @@
 
 - [ ] `git ls-files | wc -l` 与预期一致；无新增大文件（>1MB 仅允许 `schema/deps/*.dict.yaml` 两个词库）
 - [ ] 无密钥/证书/私货入库：`hub/tls/certs/`、`hub-secret`、`config/ai.yaml`、`*.gguf`、模型/venv 全部 .gitignore
-- [ ] 无个人路径/主机名/邮箱泄漏：`grep -rn "user\|/Users/" --include='*.md' --include='*.yaml'` 结果审阅
+- [ ] 无个人路径/主机名/邮箱泄漏：`grep -rn "/Users/" --include='*.md' --include='*.yaml'` 结果审阅（另按本机用户名/主机名各扫一遍）
 - [ ] 日志类文件（`build/logs/`、`voice/poc/last_run.json`）内容不含隐私输入样例
 - [ ] `.gitignore` 覆盖：`models/`、`voice/models/`、`voice/.venv/`、`android/**/jniLibs/`、`config/ai.yaml`
 

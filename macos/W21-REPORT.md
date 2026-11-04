@@ -111,22 +111,22 @@ $ grep -n -iE '(token|secret|api_key|password|BEGIN.*PRIVATE|Bearer)' docs/技�
 
 ### 2.3 个人路径脱敏（已提交修复）
 
-扫描：`$ git grep -l '/Users/you' | wc -l` → **22 个入库文件**（与预侦察一致）。
+扫描：`$ git grep -l '/Users/<用户名>' | wc -l` → **22 个入库文件**（与预侦察一致）。
 处置：
-- **18 个报告/日志/文本**：机械替换 `/Users/you` → `/Users/you`（375 处，ai/W3、android/W5、build/W1、build/logs×7、hub/W13、hub/W17、macos/W12、macos/W18、voice/W2、voice/poc/run_*×3）。
+- **18 个报告/日志/文本**：机械替换 `/Users/<用户名>` → `/Users/you`（375 处，ai/W3、android/W5、build/W1、build/logs×7、hub/W13、hub/W17、macos/W12、macos/W18、voice/W2、voice/poc/run_*×3）。
 - **4 个可执行代码改为动态解析**（比字面替换更稳，不破坏脚本可用性）：
   - android/w11-e2e.py、w14-e2e.py、w16-e2e.py：`ADB = os.environ.get("ADB") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")`；APK 路径改 `__file__` 相对定位。
   - schema/tests/ascii_shift_probe.c：RIME 用户目录取 `getenv("HOME")` 拼接。
-- 复扫：`$ git grep -q '/Users/you|user|<hostname>|AITebot|aitebot'; echo $?` → `1`（**0 命中**）。
+- 复扫（命令模板）：`$ git grep -q '<个人用户名>|<主机名>|<示意主机名>'; echo $?` → `1`（**0 命中**）。
 - 语法验证：`python3 -m py_compile` 三脚本 OK；`clang -fsyntax-only -I core/librime/src schema/tests/ascii_shift_probe.c` OK。
 
 ### 2.4 git 历史扫描（如实：历史仍有残留）
 
 ```text
-$ git log --oneline -S'/Users/you' --all | wc -l        → 14
-$ git log -p --all | grep -c '/Users/you'               → 2465
+$ git log --oneline -S'/Users/<用户名>' --all | wc -l        → 14
+$ git log -p --all | grep -c '/Users/<用户名>'               → 2465
 $ git log --format='%an <%ae>' | sort -u
-AITebot <dev@mine-input.local>
+<个人用户名> <<个人用户名>@<主机名>.local>
 Ping <ping@mine-input.local>
 ```
 - 历史内**无**密钥/凭据（§2.1 命令实证 0）；但个人路径 + author email 含用户名/主机名残留。
@@ -136,13 +136,13 @@ Ping <ping@mine-input.local>
 
 | 发现 | 位置 | 处置 |
 |---|---|---|
-| `my-mac`（device_id，实机主机名派生）×14 | context/W9-REPORT.md | → `mac-you` |
-| `my-mac`（SAN 输出实录）×2 | hub/W17-REPORT.md:157 | → `your-mac` |
-| `mac-aitebot`（测试 fixture）×2 | context/Tests/MemoryCoreTests.swift:366,371 | → `mac-you`（同测试内字符串一致，回归通过） |
-| `hub.local`（设计稿示意主机名）×2 | design/generate_svg.py:300、design/svg/M7-*.svg | → `your-hub.local` |
-| `user`（ls 属主行）×1 | build/logs/w7-build-rerun.log:83 | → `you` |
+| `mac-<主机名派生>`（device_id，实机主机名小写去连字符派生）×14 | context/W9-REPORT.md | → `mac-you` |
+| `<实机主机名>`（SAN 输出实录）×2 | hub/W17-REPORT.md:157 | → `your-mac` |
+| `mac-<开发机名>`（测试 fixture）×2 | context/Tests/MemoryCoreTests.swift:366,371 | → `mac-you`（同测试内字符串一致，回归通过） |
+| `<示意主机名>.local`（设计稿示意主机名）×2 | design/generate_svg.py:300、design/svg/M7-*.svg | → `your-hub.local` |
+| `<个人用户名>`（ls 属主行）×1 | build/logs/w7-build-rerun.log:83 | → `you` |
 
-复扫：实机主机名 `my-mac` / 用户名 `user` / `<hostname>` 全仓 **0 命中**（§2.3 命令）。
+复扫：实机主机名 / 个人用户名 / `<示意主机名>` 模式全仓 **0 命中**（§2.3 命令模板；本报告引用样例已一并脱敏）。
 
 ## 3. .gitignore 完整性核查
 
@@ -215,7 +215,7 @@ DebugReceiver.kt:29  if (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBU
 
 | 文件 | 改动 |
 |---|---|
-| 18 个报告/日志/文本 | 个人路径脱敏 ×375（`/Users/you`→`/Users/you`） |
+| 18 个报告/日志/文本 | 个人路径脱敏 ×375（`/Users/<用户名>`→`/Users/you`） |
 | android/w11-e2e.py、w14-e2e.py、w16-e2e.py | ADB/APK 路径改 env/动态解析 |
 | schema/tests/ascii_shift_probe.c | RIME 目录改 `$HOME` 动态解析（clang 语法过） |
 | context/W9-REPORT.md、hub/W17-REPORT.md、MemoryCoreTests.swift、design/generate_svg.py、design/svg/M7-*.svg | 机器名脱敏（§2.5） |
