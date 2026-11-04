@@ -131,26 +131,27 @@ struct ContextCtl {
         let shown = args.flag("shown").flatMap(Int.init)
         let taken = args.flag("taken").flatMap(Int.init)
         let appId = args.flag("app-id")
+        let ts = args.flag("ts").flatMap(Int64.init) // 事件时间（Unix 毫秒），回放/配对演示用
         switch kind {
         case .voiceSession:
             return collector.recordVoiceSession(
                 textIn: textIn, textOut: textOut,
                 suggestionShown: shown, suggestionTaken: taken,
-                appId: appId, secureInput: secure)
+                appId: appId, secureInput: secure, ts: ts)
         case .candidatePick:
             return collector.recordCandidatePick(
                 textIn: textIn, textOut: textOut,
-                keystrokeCadence: cadence, appId: appId, secureInput: secure)
+                keystrokeCadence: cadence, appId: appId, secureInput: secure, ts: ts)
         case .suggestionFeedback:
             return collector.recordSuggestionFeedback(
                 shown: shown ?? 0, taken: taken ?? 0,
-                textIn: textIn, adoptedText: textOut, appId: appId)
+                textIn: textIn, adoptedText: textOut, appId: appId, ts: ts)
         case .keySession:
             return collector.recordKeySession(
                 textIn: textIn, textOut: textOut,
                 keystrokeCadence: cadence,
                 suggestionShown: shown, suggestionTaken: taken,
-                appId: appId, secureInput: secure)
+                appId: appId, secureInput: secure, ts: ts)
         }
     }
 
@@ -372,7 +373,7 @@ struct ContextCtl {
       contextctl collect app
       contextctl collect inject --kind key_session|voice_session|candidate_pick|suggestion_feedback
                     [--text-in S] [--text-out S] [--cadence X] [--shown N] [--taken N]
-                    [--app-id A] [--device-id D] [--secure-input] [--db PATH]
+                    [--app-id A] [--device-id D] [--secure-input] [--ts MS] [--db PATH]
       contextctl collect clipboard [--enable-explicit] [--db PATH]
       contextctl collect status [--db PATH]
       contextctl log count|list|export|clear|prune|schema [--limit N] [--kind K]

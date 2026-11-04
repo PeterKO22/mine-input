@@ -79,3 +79,37 @@ W12（macos/w12/src/W12C1Collector.swift）在 C0 之上接通 C1：屏幕快照
 显式开启，与本模块剪贴板开关同构）；密码框（`IsSecureEventInputEnabled`）自动停不可关；
 黑名单跳过、熔断立即停沿用本模块既有门禁。`C0Collector.recordC1Sample(kind:ocrDigest:asrDigest:)`
 为新增入库 API（additive）。⌥Esc 提词浮层（NSPanel）已由 W12 在 Squirrel 侧落地（见 macos/W12-REPORT.md）。
+
+## W19 扩展（memory-jsonl，记忆层 / JSONL 对话记忆库，技术方案 §15.1）
+
+原始事件流（W9 SQLite）之上新增**记忆层**：以「情境→回复」为单位的 JSONL 记录（N6），
+append-only 落盘 `~/Library/Application Support/mine-input/memory/YYYY-MM-DD.jsonl`（`MINE_MEMORY_DIR` 可覆盖）。
+
+| 模块 | 文件 | 职责 |
+|---|---|---|
+| 记忆 schema | `Sources/MemoryCore/MemoryRecord.swift` | §15.1 记录 schema（id/ts/device/app_id/situation/my_reply/meta/consent，JSON 键逐字一致，单测防漂移） |
+| 记忆 store | `Sources/MemoryCore/MemoryStore.swift` | append JSONL 进当日文件；query（--keyword/--app/--since）；recent + suggest 注入行；edit（重写当日文件）；delete（**物理移除行**）；clearAll |
+| 情境→回复配对 | `Sources/MemoryCore/MemoryPairing.swift` | W9 事件流→记忆：一次输入会话=一条记忆（同 app、相邻间隔≤30s 的事件段）；**取消不记**（无上屏 text_out）；thread 前序回合回填；session_id 确定性（重放幂等） |
+| 隐私联动 | `MemoryPrivacy.clearAll` | 一键清空**事件层+记忆层同清**；熔断停记（breaker trip 后 append 一律拒收，记忆保留不新增） |
+| 同步挂钩 | `Sources/MemoryCore/MemorySync.swift` | 记忆→**W8 同构事件体**（/v1/ingest InteractionEvent）JSONL，`IngestQueueSink`/`JSONLQueueSink` **直进 ingest 队列** |
+| CLI | `Sources/memoryctl/MemoryCtl.swift` | `memoryctl pair/query/recent/edit/delete/clear/sync/status` |
+| 测试 | `Tests/MemoryCoreTests/` | 13 用例：schema 逐字/配对（会话/取消/语音/建议/thread）/落盘/检索/编辑/删除/熔断停记/同清/W8 事件体 |
+| 演示 | `scripts/w19-demo.sh` | 验收序列（输出见 W19-REPORT §3） |
+
+```bash
+swift build -c release && swift test
+BIN=.build/release/memoryctl
+$BIN pair --db .demo/interaction.db --memory-dir .demo/memory   # 事件流→记忆（取消不记）
+$BIN query --keyword "准时" --app TextEdit --since 7d            # 检索（回忆）
+$BIN recent --limit 5 --for-suggest                             # suggest 上下文注入行
+$BIN edit --id <uuid> --reply "…"                               # 手工编辑（重写当日文件）
+$BIN delete --id <uuid>                                         # 删除=物理移除行
+$BIN sync export / sync enqueue --queue-file F                  # W8 同构事件体 → ingest 队列
+$BIN clear                                                      # 一键清空（事件层+记忆层同清）
+bash scripts/w19-demo.sh 2>&1 | tee .demo/w19-demo-output.txt
+```
+
+隐私红线不变（§15.1）：熔断停记、删除即物理移除（导出/同步不再含该条=撤回停传）、
+一键清空同清、C1 摘要只落摘要/长度。注意：配对源是事件流，记忆删除后若源事件仍在、
+再次 `pair` 会重新生成（彻底不回流=一键清空或清事件层）；事件层「上屏文本留存默认关」
+红线不破——配对需要会话事件带 `text_out`（上屏回复），留存关闭时会话视同取消不记。

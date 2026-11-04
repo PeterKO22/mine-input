@@ -81,13 +81,14 @@ public final class C0Collector {
         suggestionShown: Int? = nil,
         suggestionTaken: Int? = nil,
         appId: String? = nil,
-        secureInput: Bool = false
+        secureInput: Bool = false,
+        ts: Int64? = nil
     ) -> InteractionStore.InsertResult {
         submit(
             kind: .keySession, textIn: textIn, textOut: textOut,
             keystrokeCadence: keystrokeCadence,
             suggestionShown: suggestionShown, suggestionTaken: suggestionTaken,
-            appId: appId, secureInput: secureInput)
+            appId: appId, secureInput: secureInput, ts: ts)
     }
 
     /// 语音会话事件入库（kind=voice_session）。
@@ -99,13 +100,14 @@ public final class C0Collector {
         suggestionShown: Int? = nil,
         suggestionTaken: Int? = nil,
         appId: String? = nil,
-        secureInput: Bool = false
+        secureInput: Bool = false,
+        ts: Int64? = nil
     ) -> InteractionStore.InsertResult {
         submit(
             kind: .voiceSession, textIn: textIn, textOut: textOut,
             asrDigest: asrDigest,
             suggestionShown: suggestionShown, suggestionTaken: suggestionTaken,
-            appId: appId, secureInput: secureInput)
+            appId: appId, secureInput: secureInput, ts: ts)
     }
 
     /// 候选采纳事件（kind=candidate_pick）。
@@ -115,12 +117,13 @@ public final class C0Collector {
         textOut: String = "",
         keystrokeCadence: Double? = nil,
         appId: String? = nil,
-        secureInput: Bool = false
+        secureInput: Bool = false,
+        ts: Int64? = nil
     ) -> InteractionStore.InsertResult {
         submit(
             kind: .candidatePick, textIn: textIn, textOut: textOut,
             keystrokeCadence: keystrokeCadence,
-            appId: appId, secureInput: secureInput)
+            appId: appId, secureInput: secureInput, ts: ts)
     }
 
     /// 提词器建议反馈（kind=suggestion_feedback；suggestion_taken=1 表示 Tab/数字/点按采纳）。
@@ -130,13 +133,14 @@ public final class C0Collector {
         taken: Int,
         textIn: String = "",
         adoptedText: String = "",
-        appId: String? = nil
+        appId: String? = nil,
+        ts: Int64? = nil
     ) -> InteractionStore.InsertResult {
         submit(
             kind: .suggestionFeedback, textIn: textIn,
             textOut: commitTextRetention ? adoptedText : "",
             suggestionShown: shown, suggestionTaken: taken,
-            appId: appId, secureInput: false)
+            appId: appId, secureInput: false, ts: ts)
     }
 
     /// C1 上下文样本入库（W12 扩展，kind=key_session（OCR）/ voice_session（ASR））：
@@ -207,7 +211,8 @@ public final class C0Collector {
         suggestionTaken: Int? = nil,
         extraNote: String? = nil,
         appId: String?,
-        secureInput: Bool
+        secureInput: Bool,
+        ts: Int64? = nil
     ) -> InteractionStore.InsertResult {
         // 熔断：一切采集立即停（先查早停，store.insert 再兜底一次）。
         if breaker.isTripped { return .refused(.tripped) }
@@ -217,6 +222,7 @@ public final class C0Collector {
             return .refused(.execFailed("blacklisted app: \(id)"))
         }
         var ev = InteractionEvent(
+            ts: ts ?? Int64(Date().timeIntervalSince1970 * 1000),
             deviceId: deviceId,
             appId: id,
             kind: kind,
