@@ -102,7 +102,9 @@ jobs:
   macos:
     name: macos (librime + Squirrel)
     needs: tests
-    runs-on: macos-14
+    # W23: macos-14 已退役且其 Xcode 15 无法编译 pin 的 squirrel 源
+    # （Swift 6 typed throws throws(Err) 与 NSGlassEffectView 均需 Xcode 26+/macOS 26 SDK）
+    runs-on: macos-26
     timeout-minutes: 180
     permissions:
       contents: write
