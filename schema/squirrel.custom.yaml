@@ -1,0 +1,4 @@
+# Squirrel 外观覆盖（源文件：随 schema/ 同步到 RIME 用户目录）
+# 用户要求：候选横排（macOS 常规形态），竖排 stacked 改 linear
+patch:
+  style/candidate_list_layout: linear
