@@ -1,0 +1,16 @@
+# config/ai-compose.override.yml — docker compose 覆盖层（W22）
+#
+# 作用：把 config/ai.yaml（经 config/ai-env.sh 映射）的 budget_ms 透传进 Hub 容器。
+# hub/docker-compose.yml 只显式透传 MODEL_URL / MODEL_NAME / SUGGEST_ALLOW_STUB_FALLBACK，
+# 未列 SUGGEST_BUDGET_MS——本覆盖层补上这一行，不动 hub/ 原文件。
+#
+# 用法（与 INSTALL.md §5 一致）：
+#   eval "$(config/ai-env.sh)"
+#   docker compose -f hub/docker-compose.yml -f config/ai-compose.override.yml up -d
+#
+# compose 会按序合并两个文件：hub 服务的 environment 映射合并（原键保留，新增
+# SUGGEST_BUDGET_MS），其余服务/卷/端口定义原样取自 hub/docker-compose.yml。
+services:
+  hub:
+    environment:
+      SUGGEST_BUDGET_MS: ${SUGGEST_BUDGET_MS:-800}

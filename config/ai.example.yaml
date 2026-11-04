@@ -1,0 +1,62 @@
+# ============================================================================
+# config/ai.example.yaml — 提炼输入法 · AI 后端用户配置（示例文件）
+# ============================================================================
+# 用法：
+#   1. cp config/ai.example.yaml config/ai.yaml   （config/ai.yaml 不入库，改你自己的）
+#   2. 按需修改下面的值（每个键都有注释）
+#   3. 让 Hub 读到它（两种方式，见 INSTALL.md §5）：
+#      a) 映射脚本：eval "$(config/ai-env.sh)" 后再 docker compose up（推荐）
+#      b) 纯环境变量：按「env 映射」注释逐个 export，不使用本文件
+#
+# 设计原则：这 4 个键就是用户需要知道的全部——后端、模型、地址、预算。
+# 未来账号登录后，模型选择会在 Hub 设置页可视化（登录即下发同一份配置），
+# 不再手改本文件；本文件保持向后兼容。
+# ============================================================================
+
+ai:
+  # ---- backend：AI 后端形态（三选一）--------------------------------------
+  #   local_gguf       —— 本地 GGUF（llama.cpp llama-server），离线优先、默认档。
+  #                       endpoint 填 llama-server 地址（本机 :8092 或容器 :8091）。
+  #   openai_compatible —— 任意 OpenAI 兼容 /v1 接口（本地 vLLM/Ollama 或你自己的
+  #                       远程服务）。预留值：Hub 当前上游仅实现 llama.cpp /completion，
+  #                       选此项需自行在 endpoint 后架兼容代理（详见 README「AI 可配置专区」）。
+  #   hub              —— 客户端不直连模型，统一走你自己的 Hub（/v1/suggest），
+  #                       模型由 Hub 侧配置（即本文件作用于跑 Hub 的那台机器）。
+  backend: local_gguf
+
+  # ---- model：模型名（如实标注在每条建议的 source 字段，绝不冒充）----------
+  #   常用档：
+  #     qwen2.5-7b-instruct-q4_k_m       —— 7B Q4_K_M（推荐，宿主机原生跑需 ≥16GB 内存档）
+  #     qwen2.5-0.5b-instruct-q4_k_m     —— 0.5B（Docker VM 内存受限时的降级档）
+  #   换任何 GGUF：models/fetch_model.sh install → 改这里 → 重启 Hub，零代码改动。
+  model: qwen2.5-7b-instruct-q4_k_m
+
+  # ---- endpoint：后端地址（按 backend 语义填）-----------------------------
+  #   local_gguf：llama-server 的 /completion 基址（不含路径）。
+  #     宿主机原生 7B（models/run-llama-native.sh）：http://127.0.0.1:8092
+  #     compose 内 0.5B（--profile model）：http://llama:8091
+  #     Docker 容器内访问宿主机：http://host.docker.internal:8092
+  #   openai_compatible：OpenAI 兼容 API 的 base（如 http://127.0.0.1:11434/v1）。
+  #   hub：你的 Hub 地址（如 https://my-hub.example:8443，见 hub/DEPLOY-FRIENDS.md）。
+  endpoint: http://127.0.0.1:8092
+
+  # ---- budget_ms：单轮建议总预算（毫秒）----------------------------------
+  #   超时弃本轮（客户端裁剪，Hub 不裁剪）；AI 永不阻塞打字/上屏（NFR3）。
+  #   默认 800；调大 → 建议更完整但更慢；调小 → 更快但更易截断。
+  budget_ms: 800
+
+  # ---- 可选项（一般不用动）------------------------------------------------
+  # 模型不可达时是否降级到流式桩建议（done 帧 backend="stub-fallback"，诚实标注）。
+  # 设为 false 则模型挂了就不出建议（更「纯净」）。
+  allow_stub_fallback: true
+
+# ============================================================================
+# env 映射（ai.yaml → Hub 运行时环境变量；config/ai-env.sh 自动完成）：
+#   ai.model                → MODEL_NAME
+#   ai.endpoint             → MODEL_URL        （backend=local_gguf 时）
+#   ai.budget_ms            → SUGGEST_BUDGET_MS （需 -f config/ai-compose.override.yml
+#                             才会透传进容器；见该文件注释）
+#   ai.allow_stub_fallback  → SUGGEST_ALLOW_STUB_FALLBACK（0/1）
+# 客户端（sdk/ai_hub_client）对应字段：ClientConfig::base_url / ca_bundle /
+# suggest_budget_ms（默认 800），与本文件 budget_ms 同一语义。
+# ============================================================================
