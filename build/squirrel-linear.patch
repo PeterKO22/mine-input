@@ -1,0 +1,13 @@
+diff --git a/data/squirrel.yaml b/data/squirrel.yaml
+index 6053001..323a586 100644
+--- a/data/squirrel.yaml
++++ b/data/squirrel.yaml
+@@ -31,7 +31,7 @@ style:
+   #color_scheme_dark: solarized_dark
+ 
+   # horizontal is Deprecated since 0.36, Squirrel 0.15, removed since 1.0.1
+-  candidate_list_layout: stacked  # stacked | linear
++  candidate_list_layout: linear  # stacked | linear（D15 手感：候选横排，用户 2026-11-04 指定）
+   text_orientation: horizontal  # horizontal | vertical
+   inline_preedit: true
+   # Whether to embed selected candidate as text in input field

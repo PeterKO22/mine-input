@@ -52,6 +52,17 @@ else
   echo "warning: squirrel-w7.patch 无法干净套用（树里已有手动改动？继续构建）" >&2
 fi
 
+# 候选横排（用户 2026-11-04 指定手感）：data/squirrel.yaml candidate_list_layout=linear。
+# 幂等：树里已含该改动则跳过（放最后套用，避免与其他补丁上下文纠缠）。
+if git apply --check "$ROOT/build/squirrel-linear.patch" 2>/dev/null; then
+  git apply "$ROOT/build/squirrel-linear.patch"
+  echo "applied build/squirrel-linear.patch"
+elif git apply --reverse --check "$ROOT/build/squirrel-linear.patch" 2>/dev/null; then
+  echo "build/squirrel-linear.patch already applied"
+else
+  echo "warning: squirrel-linear.patch 无法干净套用（工作树可能已手改，继续构建）" >&2
+fi
+
 # make release 会依次：构建 librime（macos/squirrel/librime，pinned 子模块）→ 拉 plum 数据
 # → 拷 opencc 数据 → 构建 Sparkle.framework → xcodebuild Squirrel
 make release ARCHS='arm64'
