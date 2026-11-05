@@ -1,5 +1,15 @@
 # v0.1.1 — 英文模式与密码框隐私
 
+> **English summary** — Incremental release over v0.1.0: the macOS design is ported to Android,
+> fixing "Chinese-only input". Highlights: persistent 中/EN keyboard toggle (survives restarts)
+> with direct English/number/symbol commit (Sogou-style `commit_code`, bypassing the engine), a
+> `?123` symbol panel, number-key 1-9 candidate picking in Chinese mode, and English insertion
+> inside Chinese strings; password-field privacy (auto-switch to English and forced non-switchable
+> while focused, all context capture and AI/cloud calls disabled, restored on leaving — e2e-verified
+> zero capture logs); AI smart-candidate badges (cyan glass card + "AI" tag); and a public macOS ↔
+> Android feature-parity table. Assets: Android APK (release-signed, upgrades from v0.1.0), macOS
+> one-command package, `SHA256SUMS.txt`. The full notes below are in Chinese.
+
 对 v0.1.0 的增量：把 macOS 版的设计同步进 Android，解决「只能输入中文」问题。
 
 ## 亮点
@@ -22,8 +32,8 @@ macOS 端 Gatekeeper 提示：右键 App → 打开，或 `xattr -dr com.apple.q
 ## 安全
 
 - 构建产物由 GitHub Actions 从本仓库源码按 pin 的 commit 编译，可复现；
-- 「无遥测」承诺与威胁模型见 [SECURITY.md](../SECURITY.md)；
-- 语音模型不随包分发，按 [INSTALL.md](../INSTALL.md) 本地获取（不出网上报）。
+- 「无遥测」承诺与威胁模型见 [SECURITY.zh-CN.md](../SECURITY.zh-CN.md)；
+- 语音模型不随包分发，按 [INSTALL.zh-CN.md](../INSTALL.zh-CN.md) 本地获取（不出网上报）。
 
 ## 变更明细
 

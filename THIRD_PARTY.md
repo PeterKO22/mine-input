@@ -1,4 +1,16 @@
-# 第三方许可证归属（THIRD_PARTY）
+# 第三方许可证归属（THIRD_PARTY） / Third-Party Licenses
+
+> **English** — This file records the third-party components contained in the distribution
+> artifacts of **Mine Input / 提炼输入法** ("this project"), introduced at build time, or
+> downloaded on demand at runtime, together with their license attributions. The project itself
+> is released under **GPL-3.0-only** (see [LICENSE](LICENSE)).
+> **Verification method**: on 2026-11-04 each upstream license text was fetched directly with
+> `curl` (`raw.githubusercontent.com` / HuggingFace raw); the "Verification" column gives the
+> measured URL and the SHA256 of the original text, independently checkable with
+> `curl -s <URL> | shasum -a 256`. Unless noted otherwise every row was verified (27/28 direct
+> fetches succeeded; for Sparkle the upstream raw path 404s, so the vendored copy in the build
+> tree is cited instead, labeled as such). License identifiers in the tables below are kept as-is
+> in their standard SPDX form; the detailed tables remain in Chinese.
 
 > 本文件记录 **提炼输入法 / Mine Input**（下称「本项目」）分发物中包含、构建期引入或运行时按需下载的
 > 第三方组件及其许可证归属。本项目本体以 **GPL-3.0-only** 发布（见 [LICENSE](LICENSE)）。

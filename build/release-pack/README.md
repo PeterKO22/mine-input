@@ -45,5 +45,5 @@ bash uninstall.sh --purge  # 连 ~/Library/Rime-mine-dev 一起删
 ## 更多
 
 - 完整文档：<https://github.com/PeterKO22/mine-input>（README / INSTALL.md）
-- 安全承诺（无遥测、数据不出你的地盘）：<https://github.com/PeterKO22/mine-input/blob/main/SECURITY.md>
+- 安全承诺（无遥测、数据不出你的地盘）：<https://github.com/PeterKO22/mine-input/blob/main/SECURITY.zh-CN.md>
 - AI 模型（可选，不随包分发）：`models/fetch_model.sh` + `models/MODEL-SOURCE.md`

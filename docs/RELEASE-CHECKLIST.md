@@ -30,6 +30,7 @@
 - [ ] `SECURITY.md` 已就位（W21 交付）且与 README 安全承诺无矛盾
 - [ ] `INSTALL.md` 步骤在**干净环境**逐条走通（或标注未实测项）
 - [ ] 产品名统一：中文「提炼输入法」/ 英文 "Mine Input"（D15），macOS 输入源、Android 应用名、README 标题三处一致
+- [ ] 发布文档双语：README / INSTALL / SECURITY 中英双版齐备（英文版用标准文件名，中文版 `*.zh-CN.md` 逐字保留），顶部互挂语言切换行；README/RELEASE-NOTES/报告里引用它们的相对链接指向对应语言版本且逐一可解析
 - [ ] `config/ai.example.yaml` 四键（backend/model/endpoint/budget_ms）与 README AI 专区、INSTALL §5 表述一致
 
 ## 4. 构建与测试（实测打勾，不走过场）

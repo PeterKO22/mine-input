@@ -1,8 +1,18 @@
 # 提炼输入法 v0.1.0（Mine Input）
 
+> **English summary** — Mine Input v0.1.0: a Wubi 86 + Pinyin hybrid, push-to-talk input method
+> for macOS + Android, backed by your own AI. Every release asset is built by GitHub Actions from
+> this repository's source in CI (reproducible and auditable) — no locally packaged artifacts are
+> distributed. Assets: an Android APK (arm64-v8a, release-key signed), a macOS arm64 package
+> (Squirrel.app + `install.sh` + `uninstall.sh` + quick-start README), and `SHA256SUMS.txt`. No
+> model weights ship with the package — hybrid typing is a pure local engine with zero model
+> dependencies. Known limits: the macOS package is unsigned/unnotarized (Gatekeeper steps below),
+> Android is sideload-distributed, and Git history still has first-commit author residue (planned
+> filter-repo scrub). The full notes below are in Chinese.
+
 > 五笔 86 + 拼音混合、按住即说的输入法（macOS + Android），背后是**你自己的 AI**。
 > **本 Release 的全部安装包由 GitHub Actions 从本仓库源码在 CI 编译产出**（可复现、可审计），
-> 不分发任何本地打包产物；构建流程见 [release.yml](.github/workflows/release.yml)。
+> 不分发任何本地打包产物；构建流程见 [release.yml](../.github/workflows/release.yml)。
 
 ## 资产清单
 
@@ -42,27 +52,27 @@ shasum -a 256 -c SHA256SUMS.txt    # Linux 用 sha256sum -c SHA256SUMS.txt
 
 ## 🔒 安全承诺
 
-见 [SECURITY.md](SECURITY.md)：**无遥测**、数据只进你自己的设备与自托管 Hub、
+见 [SECURITY.zh-CN.md](../SECURITY.zh-CN.md)：**无遥测**、数据只进你自己的设备与自托管 Hub、
 采集分级 + 显式同意（密码框/支付场景自动暂停）、一键熔断。发布物不含任何用户数据、
-密钥或模型权重；第三方依赖归属与分发边界见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+密钥或模型权重；第三方依赖归属与分发边界见 [THIRD_PARTY.md](../THIRD_PARTY.md)。
 
 ## 模型获取说明（不随包分发）
 
 AI 语音/建议能力需要本地模型，**任何模型权重都不在 Release 资产内**：
 
-- 语音模型（SenseVoice，约 550MB）：见 [INSTALL.md](INSTALL.md) §3 的 fetch 脚本；
+- 语音模型（SenseVoice，约 550MB）：见 [INSTALL.zh-CN.md](../INSTALL.zh-CN.md) §3 的 fetch 脚本；
 - AI 对话模型（Qwen2.5 GGUF）：`models/fetch_model.sh`，源与 SHA256 实测记录见
-  [models/MODEL-SOURCE.md](models/MODEL-SOURCE.md)；
+  [models/MODEL-SOURCE.md](../models/MODEL-SOURCE.md)；
 - **不装模型也能用**：混合输入（五笔 86 + 拼音混输、反查、词频造词）是纯本地引擎，零模型依赖。
 
 ## 可复现构建
 
 - macOS 包：按 pin 的 commit 浅克隆第三方源码（librime `e930f57b…`、squirrel `d220b92a…`，
-  子模块由 gitlink 固定），见 [build/fetch-sources.sh](build/fetch-sources.sh)；
+  子模块由 gitlink 固定），见 [build/fetch-sources.sh](../build/fetch-sources.sh)；
 - Android 包：外部依赖（sherpa-onnx AAR、commons jars、librime_jni.so）全部 SHA256 钉死
   后由 `android/fetch-deps.sh` / `android/fetch-rime-jni.sh` 可复现获取；
-- 构建流程本身在 [ci.yml](.github/workflows/ci.yml)（测试门）与
-  [release.yml](.github/workflows/release.yml) 中可审计。
+- 构建流程本身在 [ci.yml](../.github/workflows/ci.yml)（测试门）与
+  [release.yml](../.github/workflows/release.yml) 中可审计。
 
 ## 已知限制
 
