@@ -356,15 +356,43 @@ final class W27CaptureBackend: SuggestBackend {
     }
 }
 
-/// W27 验收探针（注入式）：同一 onInputEvent → 快照→Vision OCR→上下文存储→推荐链
-/// 全链路，五场景断言（与 Squirrel 内接线同一 API，同一落库路径）：
-///   1. 开 C1 后「打字」（注入按键事件 + 等价截屏帧）→ 采集日志出现 screen+OCR 条目
-///      且 SuggestContext 带屏幕文本（提词浮层请求链捕获断言）；
+/// W27-fix 探针伪时钟：防抖时序完全由注入时间驱动（零真实 sleep、零墙钟竞态）。
+final class W27ProbeClock {
+    var now: TimeInterval = 1_000.0
+    func advance(_ s: TimeInterval) { now += s }
+}
+
+/// W27 验收探针（注入式，W27-fix 确定性版）：同一 onInputEvent → 快照→Vision OCR→
+/// 上下文存储→推荐链全链路，逐案例断言**采集次数与时机**（与 Squirrel 内接线同一
+/// API，同一落库路径；探针零 open/launch、文件源等价帧零 TCC——构建树 Squirrel.app
+/// 绝不运行，真机 IME 只用装机版 Squirrel-dev.app，红线见 W27-REPORT.md §9.5）：
+///   1. 开 C1 后「打字」（注入按键事件 + 等价截屏帧）→ 首键即采集入库（screen+OCR 条目
+///      且 SuggestContext 带屏幕文本）；同会话同刻 5 键 → 0 新增（逐键 debounced 断言）；
+///      注入时间推进出防抖窗 → 恢复采集（窗口外每窗最多一轮）；
 ///   2. 关 C1 → 零采集；  3. 密码框 → 零采集；  4. 熔断 → 零采集；
-///   5. PTT 语音触发（右⌘/⌃⌥M 同一入口）→ 即时读屏；同一输入会话内合并（防抖）。
+///   5. PTT 语音触发（右⌘/⌃⌥M 同一入口）→ **防抖窗内仍即时读屏**（绕防抖实锤），
+///      pttEnd 收口零采集。
+/// W27-fix 确定性化（原 18/18 时序脆弱不可重现，勘误见 W27-REPORT.md §9）：
+///   - 防抖时序走 `W12C1Collector.clock` 注入伪时间（案例间 advance 推移，零真实 sleep）；
+///   - 探针独立库（固定路径每轮重建，起止复位 C1/熔断）：消除共享 interaction.db 的
+///     c1_enabled meta 跨轮泄漏与 Query limit 行数饱和两大不可重现主因；
+///   - 注入帧固定文件名：输出跨轮逐字一致。
 func cmdW27E2E(_ args: [String]) {
     let opts = Opts(args)
-    let bridge = makeBridge(opts)
+    // 探针独立库：固定路径、每轮重建（sqlite 侧文件同清）；--db 显式指定时不重建。
+    let probeDB = NSTemporaryDirectory() + "w27-e2e-probe.db"
+    let bridge: W12EventBridge
+    if let db = opts.db {
+        bridge = W12EventBridge(path: (db as NSString).expandingTildeInPath)
+    } else {
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: probeDB + suffix)
+        }
+        bridge = W12EventBridge(path: probeDB)
+    }
+    // 状态起止复位：C1 显式开关/熔断绝不跨案例、跨轮泄漏。
+    W12Privacy.disableC1(store: bridge.store)
+    bridge.breaker.reset()
     var failures = 0
     func check(_ ok: Bool, _ label: String) {
         print("\(ok ? "PASS" : "FAIL"): \(label)")
@@ -380,9 +408,11 @@ func cmdW27E2E(_ args: [String]) {
         print("FAIL: 生成注入截屏帧失败: \(error)")
         exit(1)
     }
+    let clock = W27ProbeClock()
     let collector = W12C1Collector(bridge: bridge, settings: W12Settings(debounceSeconds: 0.6))
     collector.screenContext = ScreenTextContext()   // 探针独立环，不污染进程单例
     collector.captureSourceOverride = .imageFile(imagePath)
+    collector.clock = { clock.now }                 // W27-fix：防抖时钟注入（伪时间）
     let appId = opts.appId ?? "com.apple.TextEdit"
 
     func fireEvent(_ trigger: W12InputTrigger, secureInput: Bool) -> W12C1Collector.Outcome {
@@ -395,27 +425,34 @@ func cmdW27E2E(_ args: [String]) {
         return out
     }
 
-    print("== W27 e2e 注入探针（onInputEvent → 快照→OCR→上下文存储→推荐链）==")
-    print("db: \(bridge.store.path ?? "(default)")  image: \(imagePath.path)")
+    print("== W27 e2e 注入探针（onInputEvent → 快照→OCR→上下文存储→推荐链；W27-fix 确定性版）==")
+    print("db: \(bridge.store.path ?? "(default)")（\(opts.db == nil ? "探针独立库·每轮重建" : "调用方指定")）  image: \(imagePath.path)")
+    print("时钟: 注入伪时间 t0=1000.0s（案例间 advance 推移，零真实 sleep）")
 
     // ---- 场景 2：C1 默认关 → 零采集
-    let base0 = rows().count
-    _ = fireEvent(.keystroke, secureInput: false)
-    _ = fireEvent(.keystroke, secureInput: false)
-    check(rows().count == base0, "关 C1（默认关）→ 零采集（rows \(base0) 不变）")
+    let base0 = bridge.store.count()
+    let out0a = fireEvent(.keystroke, secureInput: false)
+    let out0b = fireEvent(.keystroke, secureInput: false)
+    check(bridge.store.count() == base0, "关 C1（默认关）→ 零采集（count \(base0) 不变）")
+    if case .refused(let r) = out0a, r.contains("disabled"), case .refused = out0b {
+        check(true, "关 C1 拒收原因：\(r)")
+    } else {
+        check(false, "关 C1 应 refused(disabled)（实际 \(out0a) / \(out0b)）")
+    }
 
     // ---- 场景 1：开 C1 → 打字 → screen+OCR 条目 + SuggestContext 带屏幕文本
     W12Privacy.enableC1(store: bridge.store, explicitConfirm: true)
-    // 首键触发采集（异步 OCR）；同会话立即连打 5 键挤进防抖窗（确定性合并断言）
+    // 首键触发采集（异步 OCR）；同会话**同一伪时刻**连打 5 键（t+0.0s，必落防抖窗内
+    // ——确定性合并断言，不再依赖真实打字速度/OCR 耗时）。
     let sem1 = DispatchSemaphore(value: 0)
     var out1: W12C1Collector.Outcome = .skipped("none")
     collector.onInputEvent(.keystroke, appId: appId, secureInput: false) {
         out1 = $0; sem1.signal()
     }
-    var mergeCount = 0
+    var mergeReasons: [String] = []
     for _ in 0..<5 {
         collector.onInputEvent(.keystroke, appId: appId, secureInput: false) { o in
-            if case .skipped(let r) = o, r.contains("debounced") { mergeCount += 1 }
+            if case .skipped(let r) = o { mergeReasons.append(r) }
         }
     }
     sem1.wait()
@@ -424,12 +461,25 @@ func cmdW27E2E(_ args: [String]) {
         exit(1)
     }
     check(id > 0 && W12Digest.isSummaryOnly(digest), "采集入库 event_id=\(id) digest=摘要（不含全文）")
-    check(mergeCount == 5, "同一输入会话内合并（防抖窗内 5 键 → debounced ×\(mergeCount)/5）")
-    Thread.sleep(forTimeInterval: 0.05)
+    let mergeOK = mergeReasons.count == 5
+        && mergeReasons.allSatisfy { $0 == "debounced (0.0s < 0.6s)" }
+    check(mergeOK, "同一输入会话内合并（t+0.0s 同刻 5 键 → debounced ×\(mergeReasons.count)/5，0 新增）")
+    check(bridge.store.count() == base0 + 1, "合并后采集计数（时机）：6 键 → 1 轮（count \(base0) → \(base0 + 1)）")
     let ocrRows = rows().filter { $0.ocrDigest != nil }
     check(ocrRows.count == 1, "采集日志出现 screen+OCR 条目（ocrDigest 非空 ×\(ocrRows.count)）")
     check(ocrRows.allSatisfy { $0.textIn.isEmpty && $0.textOut.isEmpty }, "OCR 条目原文零落库（text_in/out 空）")
     check(!ocrRows.contains { $0.ocrDigest!.contains("W27SCREENMARK") }, "digest 列绝不含 OCR 全文")
+
+    // ---- 场景 1b（时机）：注入时间 +0.7s 推出防抖窗（0.7s > 0.6s）→ 恢复采集
+    clock.advance(0.7)
+    let base1 = bridge.store.count()
+    let out1b = fireEvent(.keystroke, secureInput: false)
+    if case .ingested(let id1b, let d1b) = out1b, id1b > 0, W12Digest.isSummaryOnly(d1b) {
+        check(true, "出防抖窗（t+0.7s > 0.6s）→ 恢复采集 event_id=\(id1b)（窗口外每窗最多一轮）")
+    } else {
+        check(false, "出窗按键应 ingested（实际 \(out1b)）")
+    }
+    check(bridge.store.count() == base1 + 1, "出窗采集计数（时机）：+1（count \(base1) → \(base1 + 1)）")
 
     // SuggestContext 带屏幕文本（提词浮层/智能候选请求链捕获断言）
     let ctx = collector.makeSuggestContext(
@@ -443,11 +493,11 @@ func cmdW27E2E(_ args: [String]) {
     check(backend.seen?.screenText == ctx.screenText && !(backend.seen?.screenText.isEmpty ?? true),
           "⌥Esc 提词浮层请求链捕获到 screen_text（注入探针断言）")
 
-    // ---- 场景 3：密码框 → 零采集
-    Thread.sleep(forTimeInterval: 0.7)  // 出防抖窗
-    let base2 = rows().count
+    // ---- 场景 3：密码框 → 零采集（+0.7s 出窗触发 → 拒收原因逐字断言，非 debounced）
+    clock.advance(0.7)
+    let base2 = bridge.store.count()
     let out3 = fireEvent(.keystroke, secureInput: true)
-    check(rows().count == base2, "密码框（secure input）→ 零采集")
+    check(bridge.store.count() == base2, "密码框（secure input）→ 零采集")
     if case .refused(let r) = out3 { check(r.contains("secure"), "密码框拒收原因：\(r)") }
     else { check(false, "密码框应 refused（实际 \(out3)）") }
     let ctxSecure = collector.makeSuggestContext(
@@ -455,26 +505,34 @@ func cmdW27E2E(_ args: [String]) {
     check(ctxSecure.screenText.isEmpty, "密码框 → SuggestContext.screenText 空（零带出）")
 
     // ---- 场景 4：熔断 → 零采集
-    Thread.sleep(forTimeInterval: 0.7)
+    clock.advance(0.7)
     bridge.breaker.trip()
-    let base3 = rows().count
+    let base3 = bridge.store.count()
     let out4 = fireEvent(.keystroke, secureInput: false)
-    check(rows().count == base3, "熔断 → 零采集")
+    check(bridge.store.count() == base3, "熔断 → 零采集")
     if case .refused(let r) = out4 { check(r.contains("circuit breaker"), "熔断拒收原因：\(r)") }
     else { check(false, "熔断应 refused（实际 \(out4)）") }
     let ctxBreaker = collector.makeSuggestContext(beforeCursor: "x", appId: appId)
     check(ctxBreaker.screenText.isEmpty, "熔断 → SuggestContext.screenText 空")
     bridge.breaker.reset()
 
-    // ---- 场景 5：PTT 语音触发（右⌘/⌃⌥M 同一入口）→ 即时读屏
-    Thread.sleep(forTimeInterval: 0.7)
-    let base4 = rows().count
+    // ---- 场景 5：PTT 语音触发（右⌘/⌃⌥M 同一入口）→ 即时读屏（绕防抖实锤）
+    // W27-fix：+0.1s **故意落在防抖窗内**（0.1s < 0.6s，距上一采集判定仅 0.1s）——
+    // pttStart 必须即时入库；产品缺陷修复前此处被 debounced（旧探针靠 sleep 落窗外才绿）。
+    clock.advance(0.1)
+    let base4 = bridge.store.count()
     let out5 = fireEvent(.pttStart, secureInput: false)
-    check(rows().count == base4 + 1, "PTT 语音触发（onInputEvent .pttStart）→ 即时读屏入库")
+    check(bridge.store.count() == base4 + 1,
+          "PTT 语音触发（onInputEvent .pttStart）防抖窗内（0.1s < 0.6s）→ 即时读屏入库（绕防抖）")
     if case .ingested = out5 {} else { check(false, "pttStart 应 ingested（实际 \(out5)）") }
-    _ = fireEvent(.pttEnd, secureInput: false)
-    check(true, "pttEnd 收口触发窗（不采集）")
+    let out5end = fireEvent(.pttEnd, secureInput: false)
+    check(bridge.store.count() == base4 + 1, "pttEnd 收口触发窗（不采集）")
+    if case .skipped(let r) = out5end { check(r.contains("ptt end"), "pttEnd 收口原因：\(r)") }
+    else { check(false, "pttEnd 应 skipped（实际 \(out5end)）") }
 
+    // 起止复位：不留跨轮状态（独立库下亦保持卫生习惯）
+    W12Privacy.disableC1(store: bridge.store)
+    bridge.breaker.reset()
     print("== 结果：\(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ==")
     exit(failures == 0 ? 0 : 1)
 }
@@ -492,7 +550,8 @@ enum W27ProbeImage {
         img.unlockFocus()
         let png = NSBitmapImageRep(data: img.tiffRepresentation!)!
             .representation(using: .png, properties: [:])!
-        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "w27-frame-\(UUID().uuidString).png")
+        // W27-fix：固定文件名（原 UUID 名跨轮漂移，破坏输出逐字一致；每轮覆盖写）
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "w27-probe-frame.png")
         try png.write(to: url)
         return url
     }
@@ -511,7 +570,7 @@ guard let cmd = args.first else {
       prompter --backend hub|null [--token T] [--text S] [--adopt N] [--from-voice]
       breaker trip|reset|status
       hub-token --username u --password p [--url http://localhost:8088]
-      w27-e2e  （W27 注入探针：开C1打字→screen+OCR+屏幕文本 / 关C1 / 密码框 / 熔断 / PTT 五场景断言）
+      w27-e2e  （W27 注入探针·确定性版：开C1打字→screen+OCR+屏幕文本 / 关C1 / 密码框 / 熔断 / PTT 绕防抖；注入伪时钟、逐案例断言采集次数与时机）
     全局: --db <sqlite 路径>（默认 ~/Library/Application Support/mine-input/interaction.db）
     """)
     exit(0)

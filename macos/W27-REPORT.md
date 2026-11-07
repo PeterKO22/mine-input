@@ -171,3 +171,102 @@ pttEnd 收口；makeSuggestContext 四门禁（关/开/熔断/密码框）。
   `W20MemoryPanel.swift`（C1 开关/状态/确认弹窗）、`W20SquirrelGlue.swift`（同源实现）。
 - **文档**：`SECURITY.md` / `SECURITY.zh-CN.md`（§3 数据分类表 + macOS 条目）、
   `docs/平价表-macos-android.md`（#9 + TODO-F）、`macos/w12/tools/w12ctl/main.swift`（w27-e2e）。
+
+## 9. 勘误（W27-fix：w27-e2e 确定性化 + PTT 绕防抖产品修复）
+
+### 9.1 原 §6.1「18/18」的性质勘误
+
+§6.1 的 18/18 为**时序脆弱结果，不可稳定重现**：独立重跑 4 轮，1 轮败
+「PTT 语音触发（onInputEvent .pttStart）→ 即时读屏入库」、3 轮败
+「开 C1 打字→采集入库（实际 skipped("debounced (0.2s < 0.6s)")）」，败点随运行漂移。
+W27-fix 复现实锤出三类探针缺陷 + 一类产品缺陷：
+
+1. **跨轮状态泄漏（探针）**：w27-e2e 默认共享 `interaction.db`，`W12Privacy.enableC1`
+   写入的 meta `c1_enabled=1` 不复位、**跨轮泄漏**（复现时共享库实存 `c1_enabled|1`）——
+   下一轮「关 C1」场景实际在采、挤占防抖窗，下一场景首键 0.2s 即判 debounced
+   （`0.2s < 0.6s` 正是泄漏采集与首键的间隔），败点漂移由此而来；
+2. **行数饱和（探针）**：断言用 `Query(limit: 1000)` 的返回行数做增量比较，共享库
+   ≥1000 行后恒饱和（复现时实存 rows=1000，「rows 1000 不变」假绿）——`base+1` 类
+   增量断言（PTT「即时读屏入库」的落法）在饱和库上恒假，这是 PTT 一败的机制；
+3. **墙钟竞态（探针）**：案例间用真实 `Thread.sleep(0.7)` 模拟事件间隔、贴着 0.6s
+   防抖窗，调度延迟即可改变判定结果（车道自述 18/18 不可稳定重现的直接原因）；
+4. **产品缺陷（实锤，已修产品码）**：`.pttStart` 文档声称「即时读屏」，实际与
+   `.keystroke` 同走防抖判定——**防抖窗内会被 debounced**，原探针靠 sleep 把 pttStart
+   推到窗外才绿，属探针掩盖产品缺陷。
+
+### 9.2 探针修复（`macos/w12/tools/w12ctl/main.swift`，w27-e2e 确定性版）
+
+- **防抖时钟注入化**：时序走 `W12C1Collector.clock` 注入伪时间（`W27ProbeClock`，
+  t0=1000.0s），案例间 `advance` 推移替代真实 sleep——零墙钟、零时序竞态；
+- **逐案例断言采集次数与时机**：每案例以 `store.count()` 增量断言（COUNT 查询，
+  不受 Query limit 影响）+ 时机断言（同刻 5 键逐键 reason 逐字
+  `debounced (0.0s < 0.6s)`、+0.7s>0.6s 出窗恢复采集、拒收原因逐字断言）；
+- **pttStart 绕防抖实锤案例**：`advance(0.1)` **故意落在防抖窗内**（0.1s < 0.6s）触发
+  `.pttStart` → 断言即时入库（产品缺陷修复前此处必被 debounced）；`.pttEnd` 收口
+  断言零新增 + 收口原因逐字；
+- **探针独立库**：固定路径 `$TMPDIR/w27-e2e-probe.db` 每轮重建（含 -wal/-shm 同清），
+  起止 `disableC1`/`breaker.reset()` 复位——跨轮零泄漏、event_id/count 全确定；
+- **注入帧固定文件名**（原 UUID 名跨轮漂移）→ **连跑 5 轮输出逐字一致**（§9.4）。
+
+### 9.3 产品修复（`macos/w12/src/W12C1Collector.swift`）
+
+- **`.pttStart` 真绕防抖**：`decideTrigger(..., immediate:)` 新参（默认 `false`，
+  `.keystroke` 行为不变），`onInputEvent` 对 `.pttStart` 传 `immediate: true` →
+  防抖窗内仍即时读屏（「按键（包括语音快捷键）即读取屏幕」按文档语义落真）；
+  门禁不变（C1 显式开关/密码框/熔断/黑名单照旧），防抖只合并按键流；
+- **防抖时钟注入点**：`clock: () -> TimeInterval`（默认 `Date()`，生产行为不变，
+  `onInputEvent` 判定与 `markCaptured` 同一时间轴）；
+- **回归单测**：`W27InputEventTests.testPttStartImmediateCaptureWithinDebounceWindow`
+  （伪时钟零 sleep：窗内按键 debounced、窗内 pttStart 即时 +1、pttEnd 零新增）。
+
+### 9.4 5 轮实证（连跑 5 轮 w27-e2e 全绿且逐字一致）
+
+命令：`cd macos/w12 && swift build -c release && .build/release/w12ctl w27-e2e`（×5）。
+5 轮 exit=0，输出 **sha256 全同**：`b67bfb0f266a5a36f24a1926328a4d6408c1bba217ecc2c1ba30c699ca253968`，
+`diff round1 roundN`（N=2..5）逐字一致。单轮输出（23/23 PASS）：
+
+```
+== W27 e2e 注入探针（onInputEvent → 快照→OCR→上下文存储→推荐链；W27-fix 确定性版）==
+db: …/T/w27-e2e-probe.db（探针独立库·每轮重建）  image: …/T/w27-probe-frame.png
+时钟: 注入伪时间 t0=1000.0s（案例间 advance 推移，零真实 sleep）
+PASS: 关 C1（默认关）→ 零采集（count 0 不变）
+PASS: 关 C1 拒收原因：C1 collection disabled (default off; 需显式开启)
+PASS: 采集入库 event_id=1 digest=摘要（不含全文）
+PASS: 同一输入会话内合并（t+0.0s 同刻 5 键 → debounced ×5/5，0 新增）
+PASS: 合并后采集计数（时机）：6 键 → 1 轮（count 0 → 1）
+PASS: 采集日志出现 screen+OCR 条目（ocrDigest 非空 ×1）
+PASS: OCR 条目原文零落库（text_in/out 空）
+PASS: digest 列绝不含 OCR 全文
+PASS: 出防抖窗（t+0.7s > 0.6s）→ 恢复采集 event_id=2（窗口外每窗最多一轮）
+PASS: 出窗采集计数（时机）：+1（count 1 → 2）
+PASS: SuggestContext.screenText 非空（近期 OCR 摘要）
+PASS: screenText 含屏幕 OCR 内容（截断拼接策略生效）
+PASS: ⌥Esc 提词浮层请求链捕获到 screen_text（注入探针断言）
+PASS: 密码框（secure input）→ 零采集
+PASS: 密码框拒收原因：secure input: auto-paused (cannot be disabled)
+PASS: 密码框 → SuggestContext.screenText 空（零带出）
+PASS: 熔断 → 零采集
+PASS: 熔断拒收原因：circuit breaker tripped: collection stopped
+PASS: 熔断 → SuggestContext.screenText 空
+PASS: PTT 语音触发（onInputEvent .pttStart）防抖窗内（0.1s < 0.6s）→ 即时读屏入库（绕防抖）
+PASS: pttEnd 收口触发窗（不采集）
+PASS: pttEnd 收口原因：ptt end (input window closed)
+== 结果：ALL PASS ==
+```
+
+单测无回归：context **37/37**（MemoryCore 18 + ContextCore 19）、macos/w12 **16/16**
+（W12CoreTests 8 + W27InputEventTests 8，含 W27-fix 新增 1，原 15 全绿不回归）。
+
+### 9.5 红线：禁止 launch 构建树 Squirrel.app（TCC 骚扰实锤，全体后续轮次遵守）
+
+- **事实**：测试/注入链路曾拉起构建树 `macos/squirrel/build/Build/Products/Release/Squirrel.app`
+  （PID 70541，20:07:50）；该副本以独立身份请求 `kTCCServiceScreenCapture`、cdhash 随每次
+  重建漂移，tccd 报 `Failed to match existing code requirement`，用户端授权弹窗不息
+  （tccd 日志 20:14:55 指向构建树路径）——**对用户构成骚扰**。
+- **红线**：构建产物**只用于编译验证，绝不 `open`/launch 运行**；「真机 IME」只指装机版
+  `~/Library/Input Methods/Squirrel-dev.app`（注入探针目标对准它）；测试/注入链路一律用
+  文件源等价帧（w27-e2e 即文件源，零 TCC、零拉起任何 app）。
+- **审计**（W27-fix 轮）：`w12ctl w27-e2e` 全链无任何 open/launch 语句（`c1 capture
+  --source screen` 为显式实测入口，需 TCC 但不拉起任何 app）；`macos/w27/scripts/apply-w27.sh`
+  纯 `git apply` 补丁脚本，无 open/launch——**无需清理项**，本红线入档后任何轮次新增
+  open/launch 语句须改指装机版或删除。

@@ -40,7 +40,9 @@ public final class W12C1Collector {
     /// 触发判定（纯函数，可单测）：防抖 2s + 仅输入时触发。
     /// - Parameter lastCaptureAt: 上一轮采集时刻（秒）；nil = 从未采集；
     /// - Parameter lastKeyAt: 最近一次按键时刻（按键触发窗）；
-    /// - Parameter pttActive: PTT 语音会话进行中。
+    /// - Parameter pttActive: PTT 语音会话进行中；
+    /// - Parameter immediate: W27-fix——`.pttStart` 显式动作（「按键（包括语音快捷键）
+    ///   即读取屏幕」）**绕防抖**：防抖窗内仍即时采集；防抖只合并按键流（.keystroke）。
     public struct TriggerDecision: Equatable {
         public let shouldCapture: Bool
         public let reason: String
@@ -51,7 +53,8 @@ public final class W12C1Collector {
         lastCaptureAt: TimeInterval?,
         lastKeyAt: TimeInterval?,
         pttActive: Bool,
-        debounce: TimeInterval = 2.0
+        debounce: TimeInterval = 2.0,
+        immediate: Bool = false
     ) -> TriggerDecision {
         // 仅输入时触发：PTT 期间，或按键触发窗内（距最近按键 ≤ 防抖窗）
         let inInputWindow = pttActive
@@ -59,10 +62,14 @@ public final class W12C1Collector {
         guard inInputWindow else {
             return TriggerDecision(shouldCapture: false, reason: "not in input window (PTT 期间/按键触发窗之外)")
         }
-        if let last = lastCaptureAt, now - last < debounce {
+        // W27-fix：immediate（.pttStart）绕防抖——PTT 键是用户显式动作，防抖窗内仍即时读屏；
+        // 防抖只合并按键流，不吞显式 PTT 触发（原实现 pttStart 与 keystroke 同走防抖判定，
+        // 防抖窗内会被 debounced，与「即时读屏」文档语义不符——产品缺陷实锤修复）。
+        if !immediate, let last = lastCaptureAt, now - last < debounce {
             return TriggerDecision(shouldCapture: false, reason: "debounced (\(String(format: "%.1f", now - last))s < \(debounce)s)")
         }
-        return TriggerDecision(shouldCapture: true, reason: "input trigger (ptt=\(pttActive))")
+        let suffix = immediate ? ", immediate: bypass debounce" : ""
+        return TriggerDecision(shouldCapture: true, reason: "input trigger (ptt=\(pttActive)\(suffix))")
     }
 
     public static let shared = W12C1Collector()
@@ -74,6 +81,9 @@ public final class W12C1Collector {
     /// W27 注入探针/测试用：非 nil 时采集走该源（文件源=等价一帧截屏，同一 OCR→摘要→
     /// 入库链路）；生产恒 nil（走 .screen ScreenCaptureKit）。
     public var captureSourceOverride: W12CaptureSource? = nil
+    /// W27-fix 防抖时钟注入（默认 `Date()` 墙钟，生产行为不变）：探针/单测传伪时间，
+    /// 消除「用真实 sleep 模拟事件间隔」撞防抖窗的时序竞态（w27-e2e 确定性化的落点）。
+    public var clock: () -> TimeInterval = { Date().timeIntervalSince1970 }
     private let lock = NSLock()
     private var lastCaptureAt: TimeInterval? = nil
     private var lastKeyAt: TimeInterval? = nil
@@ -102,6 +112,8 @@ public final class W12C1Collector {
     ///   - `.keystroke`：按键触发窗 + 防抖 → 屏幕快照→Vision OCR→上下文存储；
     ///   - `.pttStart`：PTT 语音触发（右⌘按下 / ⌃⌥M）——打开语音触发窗（pttActive）
     ///     **并**即时触发一轮屏幕采集（「按键（包括语音快捷键）即读取屏幕」）；
+    ///     **绕防抖**（W27-fix）：PTT 键为显式动作，防抖窗内仍即时读屏（原实现误走防抖
+    ///     判定，窗内被 debounced——产品缺陷已修，防抖只合并按键流）；
     ///   - `.pttEnd`：PTT 结束收口触发窗（不采集）。
     ///
     /// 门禁照旧：C1 显式开关（默认关）/ 密码框（secureInput）零采集 / 熔断立即停 /
@@ -131,12 +143,13 @@ public final class W12C1Collector {
             completion?(.skipped("c1 screen sub-switch off"))
             return
         }
-        let now = Date().timeIntervalSince1970
+        let now = clock()
         lock.lock()
         lastKeyAt = now
         let decision = Self.decideTrigger(
             now: now, lastCaptureAt: lastCaptureAt, lastKeyAt: now,
-            pttActive: pttActive, debounce: settings.debounceSeconds)
+            pttActive: pttActive, debounce: settings.debounceSeconds,
+            immediate: trigger == .pttStart)   // W27-fix：pttStart 绕防抖（即时读屏）
         if decision.shouldCapture { lastCaptureAt = now }
         lock.unlock()
         guard decision.shouldCapture else {
@@ -287,7 +300,7 @@ public final class W12C1Collector {
     /// 记录采集时刻（防抖基准；同步小函数，避免 async 上下文用锁）。
     private func markCaptured() {
         lock.lock()
-        lastCaptureAt = Date().timeIntervalSince1970
+        lastCaptureAt = clock()   // W27-fix：走注入时钟（默认 Date()），与触发判定同一时间轴
         lock.unlock()
     }
 

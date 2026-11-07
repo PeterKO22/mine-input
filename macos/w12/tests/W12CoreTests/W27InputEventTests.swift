@@ -212,6 +212,42 @@ final class W27InputEventTests: XCTestCase {
         XCTAssertTrue(collector.makeSuggestContext(beforeCursor: "x").screenText.isEmpty)
     }
 
+    // ------------------------------------------------------------ PTT 绕防抖（W27-fix 实锤）
+
+    func testPttStartImmediateCaptureWithinDebounceWindow() throws {
+        // 注入伪时钟（零 sleep、零墙钟竞态）：pttStart 在防抖窗内仍即时读屏；
+        // 同窗内 keystroke 仍被防抖合并——防抖只合并按键流，不吞显式 PTT 触发
+        //（产品缺陷回归测试：修复前 pttStart 与 keystroke 同走防抖判定，窗内被吞）。
+        var t: TimeInterval = 1_000
+        collector.clock = { t }
+        let png = try Self.makeTestImage(text: "PTT IMMEDIATE")
+        collector.captureSourceOverride = .imageFile(png)
+        W12Privacy.enableC1(store: bridge.store, explicitConfirm: true)
+
+        // 首键 → 采集（t+0.0s）
+        guard case .ingested = fire(.keystroke) else { return XCTFail("首键应入库") }
+        XCTAssertEqual(rows().count, 1)
+
+        // t+0.5s（防抖 2.0s 窗内）：按键 → debounced 合并；pttStart → 绕防抖即时读屏
+        t += 0.5
+        let key = fire(.keystroke)
+        guard case .skipped(let r) = key else { return XCTFail("窗内按键应 debounced：\(key)") }
+        XCTAssertTrue(r.contains("debounced"), r)
+        XCTAssertEqual(rows().count, 1, "窗内按键零新增")
+
+        let ptt = fire(.pttStart)
+        guard case .ingested(let id, let digest) = ptt else {
+            return XCTFail("pttStart 防抖窗内应即时读屏入库（绕防抖）：\(ptt)")
+        }
+        XCTAssertGreaterThan(id, 0)
+        XCTAssertTrue(W12Digest.isSummaryOnly(digest))
+        XCTAssertEqual(rows().count, 2, "pttStart 即时采集：+1（窗内不被防抖吞）")
+
+        // pttEnd 收口不采集
+        guard case .skipped = fire(.pttEnd) else { return XCTFail("pttEnd 应 skipped") }
+        XCTAssertEqual(rows().count, 2, "pttEnd 零新增")
+    }
+
     // ------------------------------------------------------------ 夹具
 
     static func makeTestImage(text: String) throws -> URL {
