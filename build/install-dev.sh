@@ -30,6 +30,15 @@ cp -R "$APP_SRC" "$APP_DST"
 codesign --force --deep --sign - "$APP_DST" 2>/dev/null || echo "(codesign ad-hoc skipped)"
 plutil -p "$APP_DST/Contents/Info.plist" | grep -E "CFBundleName|TISInputSourceID|RimeUserDir|InputMethodConnectionName" || true
 
+# W26 自检门：装机产物必须带 NSMicrophoneUsageDescription——缺此键时 macOS 静默拒绝
+# 麦克风采集（tccd 零记录），PTT 语音永远拿到静音（W26 根因）。断言失败即中止安装。
+MIC_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP_DST/Contents/Info.plist" 2>/dev/null || true)"
+if [ -z "$MIC_USAGE" ]; then
+  echo "ERROR: 安装产物缺 NSMicrophoneUsageDescription（W26 自检门）——语音输入会被 macOS 静默拒绝麦克风" >&2
+  exit 1
+fi
+echo "NSMicrophoneUsageDescription = $MIC_USAGE"
+
 echo "== [2/5] 部署并验证 RIME 用户目录 $RIME_DIR =="
 bash "$ROOT/build/verify-schema.sh" "$RIME_DIR"
 

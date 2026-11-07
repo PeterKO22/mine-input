@@ -389,20 +389,59 @@ final class W7PttController {
     guard isCapturing else { return }
     isCapturing = false
     let pcm = capture.stop()  // 环形缓冲导出（内存），随后即弃
-    controller?.w7ShowVoiceStatus("识别中…")
+    processPCM(pcm, source: "ptt") { [weak self] in
+      self?.controller?.w7ShowVoiceStatus("识别中…")
+    }
+  }
+
+  /// W26 空音频诊断：区分「没收到声音」与「真没听清」。
+  /// 判据：极短（<0.25s@16k）或全零 PCM——macOS 拒绝麦克风权限时采集恒为静音，
+  /// 这类空音频提示查权限，而不是误导性的「没听清，请重说」。
+  /// 返回 nil = 有声；非 nil = 空音频提示语。
+  static func emptyAudioReason(_ pcm: Data) -> String? {
+    let samples = pcm.count / 2
+    if samples < 4000 { return "未收到声音，请检查麦克风权限" }
+    var hasSignal = false
+    pcm.withUnsafeBytes { raw in
+      let buf = raw.bindMemory(to: Int16.self)
+      for s in buf where s != 0 { hasSignal = true; break }
+    }
+    return hasSignal ? nil : "未收到声音，请检查麦克风权限"
+  }
+
+  /// transcribe → 决策 → commit/提示。PTT 松开与 W26 注入探针共用同一条链路。
+  /// onTranscribing：通过空音频诊断后、转写开始前回调（如面板提示「识别中…」）。
+  private func processPCM(_ pcm: Data, source: String, onTranscribing: (() -> Void)? = nil) {
+    if let reason = Self.emptyAudioReason(pcm) {
+      W26Probe.log(["event": "status", "source": source, "text": reason])
+      controller?.w7ShowVoiceStatus(reason)
+      return
+    }
+    onTranscribing?()
     daemon.transcribe(pcm) { [weak self] result in
       DispatchQueue.main.async {
         guard let self else { return }
         if let err = result.error {
+          W26Probe.log(["event": "error", "source": source, "text": err])
           self.controller?.w7ShowVoiceStatus(err)
         } else if result.lowConfidence || result.text.isEmpty {
-          // 低置信不瞎猜：不 commit，提示重说
+          // 低置信不瞎猜：不 commit，提示重说（有声但没听清，与空音频诊断区分）
+          W26Probe.log(["event": "status", "source": source, "text": "没听清，请重说", "reason": result.reason])
           self.controller?.w7ShowVoiceStatus("没听清，请重说")
         } else {
-          self.controller?.w7CommitVoiceText(result.text)
+          // 到达 w7CommitVoiceText 入口（W26 注入探针以此为链路终点证据）
+          let target = self.controller ?? NSApp.squirrelAppDelegate.panel?.inputController
+          W26Probe.log(["event": "commit", "source": source, "text": result.text,
+                        "controller": target != nil])
+          target?.w7CommitVoiceText(result.text)
         }
       }
     }
+  }
+
+  /// W26 注入探针入口：把注入 PCM 走与 stopAndProcess() 完全相同的决策链。
+  func probeInject(_ pcm: Data, source: String = "probe") {
+    processPCM(pcm, source: source)
   }
 
   private func cancelCapture(reason: String) {
@@ -410,5 +449,139 @@ final class W7PttController {
     isCapturing = false
     _ = capture.stop()  // 丢弃，不送识别
     controller?.w7ShowVoiceStatus(reason)
+  }
+}
+
+// MARK: - W26 音频注入探针（macos/w26/；开发自检，非运行时功能）
+//
+// 机制：分布式通知 W7ProbeInjectNotification.dev + 请求文件 w7-probe-req.json +
+// 证据文件 w7-probe.log（均位于 RimeUserDir，dev=~/Library/Rime-mine-dev）。
+// 安全门：token 文件 w7-probe.enabled 不存在时完全惰性（默认态）——探针脚本在
+// 测试窗口内创建、结束后删除；窗口外任何本地进程发通知都会被直接忽略。
+// 目的：无真人出声时以音频注入验证「采集形态 PCM → daemon 管线 → 决策 →
+// w7CommitVoiceText 入口」整条链（macos/W26-REPORT.md 如实标注未真人实测）。
+enum W26Probe {
+  static let notificationName = "W7ProbeInjectNotification.dev"
+
+  static var dir: String {
+    W7Config.path("RimeUserDir")
+      ?? (NSHomeDirectory() as NSString).appendingPathComponent("Library/Rime-mine-dev")
+  }
+  private static var tokenPath: String { (dir as NSString).appendingPathComponent("w7-probe.enabled") }
+  private static var requestPath: String { (dir as NSString).appendingPathComponent("w7-probe-req.json") }
+  static var logPath: String { (dir as NSString).appendingPathComponent("w7-probe.log") }
+
+  private static var observer: NSObjectProtocol?
+  private static var nonce = ""
+
+  /// token 文件存在 = 探针测试窗口内（默认不存在 → 惰性）。
+  static var armed: Bool { FileManager.default.fileExists(atPath: tokenPath) }
+
+  /// 由 SquirrelApplicationDelegate.addObservers() 在启动时注册（静态注册不触发
+  /// W7PttController.shared / 不拉起 daemon；收到触发且 token 在才真正跑）。
+  static func register() {
+    guard observer == nil else { return }
+    observer = DistributedNotificationCenter.default().addObserver(
+      forName: .init(notificationName), object: nil, queue: .main) { _ in handle() }
+  }
+
+  private static func handle() {
+    guard armed else { return }  // 默认态：无 token 文件，直接忽略（不可被外部触发）
+    do {
+      try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+      let data = try Data(contentsOf: URL(fileURLWithPath: requestPath))
+      let req = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+      nonce = (req["nonce"] as? String) ?? ""
+      let myNonce = nonce
+      let action = (req["action"] as? String) ?? ""
+      log(["event": "received", "action": action], nonce: myNonce)
+      switch action {
+      case "inject":
+        let b64 = (req["pcm16_b64"] as? String) ?? ""
+        let pcm = Data(base64Encoded: b64) ?? Data()
+        W7PttController.shared.probeInject(pcm)
+      case "mic":
+        micCheck(durationMs: (req["duration_ms"] as? Double) ?? 1000, nonce: myNonce)
+      case "mic_transcribe":
+        // 真实麦克风样本端到端：采集 → 与 PTT 同一条决策链 → w7CommitVoiceText 入口
+        captureAndTranscribe(durationMs: (req["duration_ms"] as? Double) ?? 5000, nonce: myNonce)
+      default:
+        log(["event": "error", "text": "unknown action \(action)"], nonce: myNonce)
+      }
+    } catch {
+      log(["event": "error", "text": "probe request read failed: \(error.localizedDescription)"])
+    }
+  }
+
+  /// 采集探针：真跑 AVAudioEngine 一段时长并回报统计（首次运行会触发系统麦克风授权弹窗）。
+  /// 注意：首次授权弹窗期间 engine.start() 会阻塞到用户点掉弹窗——故 start 走后台队列，
+  /// 不冻结 IME 主线程（证据行/按键处理保持可响应）。
+  private static func micCheck(durationMs: Double, nonce myNonce: String) {
+    let capture = W7AudioCapture()
+    DispatchQueue.global().async {
+      do {
+        try capture.start()
+      } catch {
+        log(["event": "mic", "frames": 0, "peak": 0, "rms": 0.0, "error": error.localizedDescription], nonce: myNonce)
+        return
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + durationMs / 1000.0) {
+        let pcm = capture.stop()
+        let samples = pcm.count / 2
+        var peak: Int32 = 0
+        var sum2: Double = 0
+        pcm.withUnsafeBytes { raw in
+          let buf = raw.bindMemory(to: Int16.self)
+          for s in buf {
+            let v = Int32(s)
+            let a = v < 0 ? -v : v
+            if a > peak { peak = a }
+            sum2 += Double(v) * Double(v)
+          }
+        }
+        let rms = samples > 0 ? (sum2 / Double(samples)).squareRoot() / 32768.0 : 0.0
+        log(["event": "mic", "frames": samples, "peak": peak,
+             "rms": (rms * 10000).rounded() / 10000, "silent": peak == 0], nonce: myNonce)
+      }
+    }
+  }
+
+  /// 真实麦克风样本端到端：采集 durationMs → 交 W7PttController 同一条决策链
+  /// （空音频诊断 → daemon 转写 → w7CommitVoiceText 入口）。配合探针外放样音使用。
+  private static func captureAndTranscribe(durationMs: Double, nonce myNonce: String) {
+    let capture = W7AudioCapture()
+    DispatchQueue.global().async {
+      do {
+        try capture.start()
+      } catch {
+        log(["event": "error", "text": "mic capture start failed: \(error.localizedDescription)"], nonce: myNonce)
+        return
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + durationMs / 1000.0) {
+        let pcm = capture.stop()
+        log(["event": "mic", "frames": pcm.count / 2, "transcribe": true], nonce: myNonce)
+        W7PttController.shared.probeInject(pcm, source: "probe-mic")
+      }
+    }
+  }
+
+  /// 证据行（JSON lines）。未武装时零开销、零落盘（正常 PTT 使用不写任何文件）。
+  /// myNonce 覆盖当前 nonce（延迟回调防串号）；缺省用当前请求 nonce。
+  static func log(_ fields: [String: Any], nonce myNonce: String? = nil) {
+    guard armed else { return }
+    var obj = fields
+    obj["nonce"] = myNonce ?? nonce
+    obj["ts"] = Date().timeIntervalSince1970
+    guard let data = try? JSONSerialization.data(withJSONObject: obj),
+          var line = String(data: data, encoding: .utf8) else { return }
+    line += "\n"
+    if let fh = FileHandle(forWritingAtPath: logPath) {
+      defer { try? fh.close() }
+      fh.seekToEndOfFile()
+      fh.write(Data(line.utf8))
+    } else {
+      try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+      try? Data(line.utf8).write(to: URL(fileURLWithPath: logPath))
+    }
   }
 }

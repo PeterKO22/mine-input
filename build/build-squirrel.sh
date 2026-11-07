@@ -63,6 +63,18 @@ else
   echo "warning: squirrel-linear.patch 无法干净套用（工作树可能已手改，继续构建）" >&2
 fi
 
+# W26 voice-mic-perm：Info.plist 补 NSMicrophoneUsageDescription（缺此键时 macOS 静默拒绝
+# 麦克风采集，PTT 永远拿到静音）+ addObservers() 注册 W26Probe 注入探针（无 token 文件时
+# 完全惰性）。幂等：已含则跳过。锚点刻意避开 w12/w20 改动区，先套后套均可（见补丁头注释）。
+if git apply --check "$ROOT/build/squirrel-w26.patch" 2>/dev/null; then
+  git apply "$ROOT/build/squirrel-w26.patch"
+  echo "applied build/squirrel-w26.patch"
+elif git apply --reverse --check "$ROOT/build/squirrel-w26.patch" 2>/dev/null; then
+  echo "build/squirrel-w26.patch already applied"
+else
+  echo "warning: squirrel-w26.patch 无法干净套用（树里已有等价改动？继续构建）" >&2
+fi
+
 # make release 会依次：构建 librime（macos/squirrel/librime，pinned 子模块）→ 拉 plum 数据
 # → 拷 opencc 数据 → 构建 Sparkle.framework → xcodebuild Squirrel
 make release ARCHS='arm64'
@@ -70,5 +82,5 @@ make release ARCHS='arm64'
 APP="$SQ_SRC/build/Build/Products/Release/Squirrel.app"
 echo "== artifact =="
 ls -ld "$APP"
-plutil -p "$APP/Contents/Info.plist" | grep -E "CFBundleIdentifier|CFBundleName|TISInputSourceID|RimeUserDir|InputMethodConnectionName" || true
+plutil -p "$APP/Contents/Info.plist" | grep -E "CFBundleIdentifier|CFBundleName|TISInputSourceID|RimeUserDir|InputMethodConnectionName|NSMicrophoneUsageDescription" || true
 echo "下一步：bash build/install-dev.sh 安装到 ~/Library/Input Methods"

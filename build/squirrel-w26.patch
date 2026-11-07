@@ -1,0 +1,33 @@
+# W26 voice-mic-perm：macos/squirrel 树增量补丁（相对 dev+w7+linear+w12+w20 状态）
+#   resources/Info.plist                    补 NSMicrophoneUsageDescription（根因修复：
+#     装机 App 缺此键时 macOS 静默拒绝麦克风采集（tccd 零记录），PTT 永远拿到静音）
+#   sources/SquirrelApplicationDelegate.swift  addObservers() 注册 W26Probe 注入探针监听
+#     （静态注册不拉起 daemon；token 文件不存在时完全惰性，见 macos/w26/）
+# 幂等套用：build/build-squirrel.sh 在 squirrel-linear.patch 之后应用（新克隆可复现）；
+# 也可手动：cd macos/squirrel && git apply ../../build/squirrel-w26.patch
+# 锚点选 NSPrincipalClass/addObservers 尾部——w12/w20 不触碰这两处，任何套用顺序上下文均一致。
+diff --git a/resources/Info.plist b/resources/Info.plist
+--- a/resources/Info.plist
++++ b/resources/Info.plist
+@@ -101,6 +101,8 @@
+ 	<true/>
+ 	<key>NSPrincipalClass</key>
+ 	<string>NSApplication</string>
++	<key>NSMicrophoneUsageDescription</key>
++	<string>语音输入需要使用麦克风（按住右 Command 说话，松开上屏）</string>
+ 	<key>SUEnableAutomaticChecks</key>
+ 	<false/>
+ 	<key>RimeUserDir</key>
+diff --git a/sources/SquirrelApplicationDelegate.swift b/sources/SquirrelApplicationDelegate.swift
+--- a/sources/SquirrelApplicationDelegate.swift
++++ b/sources/SquirrelApplicationDelegate.swift
+@@ -243,6 +243,9 @@
+     notifCenter.addObserver(self, selector: #selector(inputSourceChanged(_:)),
+                             name: .init(kTISNotifySelectedKeyboardInputSourceChanged as String),
+                             object: nil, suspensionBehavior: .deliverImmediately)
++    // W26:语音空音频诊断 + 音频注入探针自检（macos/w26/，macos/W26-REPORT.md）。
++    // 静态注册仅挂观察者，不拉起 W7PttController/daemon；token 文件不存在时完全惰性。
++    W26Probe.register()
+   }
+ 
+   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
