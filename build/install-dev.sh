@@ -30,6 +30,17 @@ if defaults read com.apple.HIToolbox AppleSelectedInputSources 2>/dev/null | gre
   echo "WARN: FORCE_INSTALL=1，输入法使用中仍强制替换（可能触发 TIS 暂清）。" >&2
 fi
 
+# W27 事故门：同 bundle id 的第二份 Squirrel（如仓库构建产物被 open）会抢走 IMK
+# 输入连接，杀掉它会连带砍断用户正在用的输入会话（需重启才能恢复）。安装前确保全局
+# 只有装机版在跑：发现其他路径的 Squirrel 进程一律终止并提示。
+for _pid in $(pgrep -f "Squirrel.app/Contents/MacOS/Squirrel" 2>/dev/null || true); do
+  _path="$(ps -p $_pid -o comm= 2>/dev/null || true)"
+  case "$_path" in
+    "$APP_DST"*) ;;
+    *Squirrel*) echo "WARN: 终止同名进程（路径: $_path，pid=$_pid）——防 IMK 连接被抢" >&2; kill "$_pid" 2>/dev/null || true ;;
+  esac
+done
+
 echo "== [1/5] 安装 $APP_DST =="
 mkdir -p "$IM_DIR"
 # W18 坑：替换 bundle 前先停掉旧 dev IME 进程——否则旧进程占着已删除的 inode，
