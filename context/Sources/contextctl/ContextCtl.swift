@@ -255,9 +255,10 @@ struct ContextCtl {
             beforeCursor: text,
             appId: args.flag("app-id") ?? "",
             fromVoice: args.boolFlag("from-voice"),
-            contextDigest: args.flag("digest") ?? "")
+            contextDigest: args.flag("digest") ?? "",
+            screenText: args.flag("screen-text") ?? "")
         print("suggest backend: \(label)  timeout=\(Int(timeout * 1000))ms（超时弃本轮，NFR3）")
-        print("ctx: before_cursor=\(text) from_voice=\(ctx.fromVoice)")
+        print("ctx: before_cursor=\(text) from_voice=\(ctx.fromVoice) screen_text=\(ctx.screenText.isEmpty ? "（空）" : "(\(ctx.screenText.count) chars)")")
         let result = await SuggestRound.run(backend: backend, ctx: ctx, timeout: timeout)
         _ = result
     }

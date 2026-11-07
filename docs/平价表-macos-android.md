@@ -2,7 +2,7 @@
 
 > 规则：Mac（Tier A）为设计基准，Android（Tier B）逐项对齐；深水区只列 TODO 卡不展开。
 > 证据列引用 e2e/实测口径；随每轮同步任务更新。
-> 最后更新：W24（2026-11-04）
+> 最后更新：W27（2026-11-07）
 
 | # | 功能 | macOS 现状（基准） | Android 现状 | 差距 / 动作 | 状态 |
 |---|------|---------------------|--------------|-------------|------|
@@ -14,6 +14,7 @@
 | 6 | 记忆管理 | W20：⌥M 浮层（按日时间线 / 编辑 situation·my_reply / 删除 / 搜索 / 导出 + 采集状态 + 熔断 CircuitBreaker 同源） | 设置页部分等价（撤回同意 / 一键熔断 / 数据导出，W11）；无记忆时间线管理 UI | 深水区 → TODO-B（本期不展开） | ❌ TODO-B |
 | 7 | 产品名 | W18：「提炼输入法」/ "Mine Input"（TIS 输入源 + 菜单栏本地化） | W18：app_name/ime_name 同名（values / values-en），aapt badging ALL PASS | 无 | ✅ 平 |
 | 8 | 密码框隐私（C1，W24 新增口径） | 需求文档 v1.0：「密码框/支付场景（Secure Input）自动暂停、不可关闭」；ContextCore `secureInput` → `refused(.secureInputPaused)` | W24：textPassword / textVisiblePassword / webPassword / numberPassword 检测 → 自动 EN + 采集闸关死（SyncManager.collectionPaused，candidate_pick/voice_session 一律拒收）+ 不调 AI/云端 + 离开恢复原模式（密码框强制 EN 不可切） | 支付场景 / 敏感应用黑名单 → TODO-D | ✅ 平（扩展了自动 EN） |
+| 9 | 按键/语音→读屏理解推荐（C1 屏幕上下文，W27 新增口径） | W27：`W12C1Collector.onInputEvent()` 统一入口（按键 + PTT 右⌘/⌃⌥M）→防抖 1–2s 同会话合并→快照→Vision OCR→`ScreenTextContext` 环（3×400/1200 截断拼接）→`SuggestContext.screen_text` 进智能候选/⌥Esc 提词请求链 + `situation.screen_text` 进记忆 JSONL；⌥M 浮层 C1 开关（首开弹确认文案）；密码框/熔断/一键清空联动 | 无 | Android 读屏采集 + 屏幕上下文推荐链（同截断拼接策略 + 同隐私门）→ TODO-F | ❌ TODO-F |
 
 ## TODO 卡（深水区，另行立项）
 
@@ -22,3 +23,4 @@
 - **TODO-C AI 智能候选真实来源**：接 Hub SPI suggest（SuggestClient 同契约）/ 端侧 GGUF 兜底；候选进 ai 标记管道（W24 已备好渲染）。
 - **TODO-D 敏感应用黑名单 + 支付场景**：Mac 同款「自动暂停不可关」扩展到应用维度。
 - **TODO-E 候选翻页**：>6 候选滑动/Tab 轮换（对齐 Mac rotate_candidate_with_tab）。
+- **TODO-F C1 读屏上下文 Android 版**：输入触发读屏（MediaProjection 快照→OCR）→ 屏幕上下文进 SuggestContext/situation（与 Mac W27 同截断拼接策略：环 3×400、总量 1200）→ 推荐链带 screen_text；C1 显式同意门（首开弹用途/范围/随时可关文案）+ 密码框（textPassword 等）零采集 + 熔断/一键清空联动 + 屏幕文本绝不出本地/自建 Hub。

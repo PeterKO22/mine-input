@@ -49,7 +49,8 @@ final class W20SquirrelHooks {
             panel = W20MemoryPanel(
                 store: W20MemoryStore(),
                 breaker: W20SquirrelBreaker(),
-                engine: W20CppProposalEngine())  // 提案卡接 C++ Null 提案桩
+                engine: W20CppProposalEngine(),  // 提案卡接 C++ Null 提案桩
+                c1Control: W20SquirrelC1Control())  // W27：C1 开关 + 状态显示
         }
         panel?.show()
     }
@@ -72,6 +73,38 @@ final class W20SquirrelBreaker: W20BreakerControl {
     }
     func trip() { breaker.trip() }
     func reset() { breaker.reset() }
+}
+
+// MARK: - C1 开关同源（W12Privacy/W12C1Collector，⌥M 浮层 C1 开关与状态显示）
+
+/// W27：⌥M 管理浮层「C1 屏幕/语音采集」开关的数据源——与采集链路共用
+/// W12Privacy 显式开关（store meta `c1_enabled`，跨进程持久，默认关）。
+/// 确认文案 = W12Privacy.consentText（用途/范围/随时可关）；关闭即清屏幕上下文。
+final class W20SquirrelC1Control: W20C1Control {
+    var isC1Enabled: Bool {
+        W12Privacy.isC1ExplicitlyEnabled(store: W12EventBridge.shared.store)
+            || W12Settings.load().c1Enabled
+    }
+    var consentText: String { W12Privacy.consentText }
+    var statusText: String {
+        let s = W12Settings.load()
+        if isC1Enabled {
+            var parts: [String] = []
+            if s.c1Screen { parts.append("屏幕") }
+            if s.c1Audio { parts.append("语音") }
+            return "C1：开（\(parts.isEmpty ? "无子项" : parts.joined(separator: "+"))，仅输入时，防抖 \(Int(s.debounceSeconds))s）"
+        }
+        return "C1：关（默认，未采集）"
+    }
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
+        if on {
+            return W12Privacy.enableC1(
+                store: W12EventBridge.shared.store, explicitConfirm: explicitConfirm)
+        }
+        W12Privacy.disableC1(store: W12EventBridge.shared.store)
+        return true
+    }
 }
 
 // MARK: - 提案引擎：C++ Null 提案桩（ObjC++ 桥）

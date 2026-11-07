@@ -51,11 +51,12 @@ deployments) mutually invisible.
 |---|---|---|---|---|---|
 | Keystroke/candidate events (InteractionEvent) | SQLite (InteractionStore, 30-day rolling) | Optional after consent | User Hub `/v1/ingest` | Hub admin (plaintext at rest) | C0 consent + circuit breaker |
 | L1 userdb / L2 counters / L3 hotwords / AI config | SQLite + RIME userdb | Optional after consent | User Hub `/v1/sync/push` | Same as above | Pairing + circuit breaker |
-| OCR/ASR **summaries** (C1/C2; only length/summary recorded, never raw text or images) | SQLite | Carried with events only under C2 consent | User Hub | Same as above | C1/C2 item-by-item explicit consent, off by default |
+| OCR/ASR **summaries** (C1/C2; only length/summary recorded in events, never raw text or images) | SQLite (digest columns only) | Carried with events only under C2 consent | User Hub | Same as above | C1/C2 item-by-item explicit consent, off by default |
 | Voice audio (PTT) | **Never on disk** (16k mono in-memory ring buffer) | No | — | — | Holding the PTT key is consent; system TCC |
 | Screen captures (C1) | **Never on disk** (original discarded right after Vision OCR) | Summaries optional only | User Hub | Same as above | C1 toggle off by default; password fields (secure input) auto-stop |
-| JSONL memory store | `~/Library/Application Support/mine-input/memory/` | Optional via the sync surface | User Hub | Same as above | Consent tiers + circuit breaker + editable/deletable/clearable |
-| suggest requests (before_cursor etc.) | Not stored (audit logs record field lengths only) | Per request | User Hub `/v1/suggest` | Same as above | Master AI toggle off by default |
+| **Screen OCR text** (W27, recent-OCR summary for understanding/suggestions; truncated & joined: 3×400-char ring, 1200-char cap) | In-memory ring only (`ScreenTextContext`, cleared on C1-off / one-click clear) + local JSONL `situation.screen_text` | **Only** inside `suggest` requests (`screen_text` field) to the user Hub; **never** in sync/ingest exports or telemetry | User Hub `/v1/suggest` (user-configured base_url only) | Hub admin | C1 explicit consent gate (first-enable confirm dialog: purpose/scope/switch-off-anytime); password fields zero-collection; circuit breaker stops immediately |
+| JSONL memory store | `~/Library/Application Support/mine-input/memory/` | Optional via the sync surface (**`screen_text` excluded from sync/ingest exports**) | User Hub | Same as above | Consent tiers + circuit breaker + editable/deletable/clearable |
+| suggest requests (before_cursor, `screen_text`, etc.) | Not stored (audit logs record field lengths only) | Per request | User Hub `/v1/suggest` | Same as above | Master AI toggle off by default |
 | TLS certs/private keys, hub-secret | `hub/tls/certs/`, `hub-data/` (0600, **not committed**) | No | — | Host administrator | Blocked by .gitignore |
 
 **The total set of off-device data** = every row above marked "Leaves device = optional/per
@@ -114,8 +115,10 @@ are off, manual trigger only.
   `c1Audio` sub-toggle + the C1 master toggle (off by default).
 - Screen: `W12ScreenCapture` sits behind the C1 master toggle (off by default) + `c1Screen` +
   auto-stop in password fields + blacklist + instant circuit-breaker stop.
-- Capture triggers only while typing (2s debounce), and stores only **summaries**
-  (length/fingerprint), never raw text or images.
+- Capture triggers only while typing (1–2s debounce, merged within one input session), and events
+  store only **summaries** (length/fingerprint), never raw text or images. W27: the recent-OCR
+  text summary lives only in the local context ring + local memory JSONL (`situation.screen_text`)
+  and rides `suggest` requests to the user Hub only — see §3 "Screen OCR text".
 
 ## 6. Hub Security Surface (`hub/`)
 

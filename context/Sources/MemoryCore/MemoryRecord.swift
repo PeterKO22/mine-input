@@ -4,13 +4,13 @@ import Foundation
 //
 //   {"id":"uuid","ts":"ISO8601","device":"mac","app_id":"…",
 //    "situation":{"before_cursor":"…","screen_digest":"sha256:… len:N","ocr_digest":"…","asr_digest":"…",
-//                 "thread":["对方:…","我:…"]},
+//                 "screen_text":"…","thread":["对方:…","我:…"]},
 //    "my_reply":{"text":"…","mode":"text|voice"},
 //    "meta":{"from_suggestion":"prop_id|","confidence":0.0,"session_id":"…"},
 //    "consent":"c0|c1"}
 //
 // 一行一条，append-only 落盘：~/Library/Application Support/mine-input/memory/YYYY-MM-DD.jsonl。
-// JSON 键名与 §15.1 逐字一致（snake_case），单测断言防漂移。
+// JSON 键名与 §15.1 逐字一致（snake_case；screen_text 为 W27 §15.1 扩展键），单测断言防漂移。
 
 /// 记忆层记录 —— 「在什么情况下，我回了什么话」为单位（N6）。
 public struct MemoryRecord: Codable, Equatable {
@@ -148,6 +148,8 @@ public struct MemoryRecord: Codable, Equatable {
 // ------------------------------------------------------------ situation
 
 /// 情境（§15.1 situation）——「在什么情况下」。
+/// W27 扩展：`screen_text`（屏幕上下文，近期 OCR 摘要）——屏幕文本只进本地记忆
+/// （ScreenTextContext 截断拼接策略），**不进同步/ingest 导出**（MemorySync 只取摘要列）。
 public struct Situation: Codable, Equatable {
     /// 输入框上下文（当前光标前文本）
     public var beforeCursor: String
@@ -157,6 +159,9 @@ public struct Situation: Codable, Equatable {
     public var ocrDigest: String?
     /// ASR 摘要（C1，仅摘要/长度；默认 nil）
     public var asrDigest: String?
+    /// 屏幕上下文（W27，C1，近期 OCR 摘要，ScreenTextContext 截断拼接；默认 nil；
+    /// 仅本地记忆 JSONL，绝不上报第三方）
+    public var screenText: String?
     /// 会话线索（["对方:…","我:…"]）
     public var thread: [String]
 
@@ -165,6 +170,7 @@ public struct Situation: Codable, Equatable {
         case screenDigest = "screen_digest"
         case ocrDigest = "ocr_digest"
         case asrDigest = "asr_digest"
+        case screenText = "screen_text"
         case thread
     }
 
@@ -173,12 +179,14 @@ public struct Situation: Codable, Equatable {
         screenDigest: String? = nil,
         ocrDigest: String? = nil,
         asrDigest: String? = nil,
+        screenText: String? = nil,
         thread: [String] = []
     ) {
         self.beforeCursor = beforeCursor
         self.screenDigest = screenDigest
         self.ocrDigest = ocrDigest
         self.asrDigest = asrDigest
+        self.screenText = screenText
         self.thread = thread
     }
 }

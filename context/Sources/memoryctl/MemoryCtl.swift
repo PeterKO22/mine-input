@@ -72,7 +72,10 @@ struct MemoryCtl {
         if let gap = args.flag("gap-ms").flatMap(Int64.init) { options.sessionGapMs = gap }
         if let dev = args.flag("device"), !dev.isEmpty { options.device = dev }
 
-        let outcome = MemoryPairing.pair(events: stream, options: options)
+        let outcome = MemoryPairing.pair(
+            events: stream, options: options,
+            // W27：屏幕上下文（近期 OCR 摘要）注入 situation.screen_text（仅 c1 记录）
+            screenText: args.flag("screen-text"))
         var appended = 0
         var skipped = 0
         for rec in outcome.memories {

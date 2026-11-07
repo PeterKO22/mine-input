@@ -344,12 +344,166 @@ func cmdHubToken(_ args: [String]) {
     }
 }
 
+// ------------------------------------------------------------ W27 e2e 注入探针
+
+/// 捕获后端：断言推荐链请求（SuggestContext）真实携带 screen_text。
+final class W27CaptureBackend: SuggestBackend {
+    var seen: SuggestContext?
+    func suggest(ctx: SuggestContext, timeout: TimeInterval,
+                 onUpdate: @escaping (SuggestUpdate) -> Void) async {
+        seen = ctx
+        onUpdate(SuggestUpdate(status: .kDone))
+    }
+}
+
+/// W27 验收探针（注入式）：同一 onInputEvent → 快照→Vision OCR→上下文存储→推荐链
+/// 全链路，五场景断言（与 Squirrel 内接线同一 API，同一落库路径）：
+///   1. 开 C1 后「打字」（注入按键事件 + 等价截屏帧）→ 采集日志出现 screen+OCR 条目
+///      且 SuggestContext 带屏幕文本（提词浮层请求链捕获断言）；
+///   2. 关 C1 → 零采集；  3. 密码框 → 零采集；  4. 熔断 → 零采集；
+///   5. PTT 语音触发（右⌘/⌃⌥M 同一入口）→ 即时读屏；同一输入会话内合并（防抖）。
+func cmdW27E2E(_ args: [String]) {
+    let opts = Opts(args)
+    let bridge = makeBridge(opts)
+    var failures = 0
+    func check(_ ok: Bool, _ label: String) {
+        print("\(ok ? "PASS" : "FAIL"): \(label)")
+        if !ok { failures += 1 }
+    }
+    let rows = { bridge.store.query(InteractionStore.Query(limit: 1000)) }
+
+    // 注入等价截屏帧（同一 OCR→摘要→入库链路；真实 ScreenCaptureKit 需 TCC，另行实测）
+    let imagePath: URL
+    do {
+        imagePath = try W27ProbeImage.make(marker: "W27SCREENMARK TextEdit meeting notes 2026")
+    } catch {
+        print("FAIL: 生成注入截屏帧失败: \(error)")
+        exit(1)
+    }
+    let collector = W12C1Collector(bridge: bridge, settings: W12Settings(debounceSeconds: 0.6))
+    collector.screenContext = ScreenTextContext()   // 探针独立环，不污染进程单例
+    collector.captureSourceOverride = .imageFile(imagePath)
+    let appId = opts.appId ?? "com.apple.TextEdit"
+
+    func fireEvent(_ trigger: W12InputTrigger, secureInput: Bool) -> W12C1Collector.Outcome {
+        let sem = DispatchSemaphore(value: 0)
+        var out: W12C1Collector.Outcome = .skipped("none")
+        collector.onInputEvent(trigger, appId: appId, secureInput: secureInput) {
+            out = $0; sem.signal()
+        }
+        sem.wait()
+        return out
+    }
+
+    print("== W27 e2e 注入探针（onInputEvent → 快照→OCR→上下文存储→推荐链）==")
+    print("db: \(bridge.store.path ?? "(default)")  image: \(imagePath.path)")
+
+    // ---- 场景 2：C1 默认关 → 零采集
+    let base0 = rows().count
+    _ = fireEvent(.keystroke, secureInput: false)
+    _ = fireEvent(.keystroke, secureInput: false)
+    check(rows().count == base0, "关 C1（默认关）→ 零采集（rows \(base0) 不变）")
+
+    // ---- 场景 1：开 C1 → 打字 → screen+OCR 条目 + SuggestContext 带屏幕文本
+    W12Privacy.enableC1(store: bridge.store, explicitConfirm: true)
+    // 首键触发采集（异步 OCR）；同会话立即连打 5 键挤进防抖窗（确定性合并断言）
+    let sem1 = DispatchSemaphore(value: 0)
+    var out1: W12C1Collector.Outcome = .skipped("none")
+    collector.onInputEvent(.keystroke, appId: appId, secureInput: false) {
+        out1 = $0; sem1.signal()
+    }
+    var mergeCount = 0
+    for _ in 0..<5 {
+        collector.onInputEvent(.keystroke, appId: appId, secureInput: false) { o in
+            if case .skipped(let r) = o, r.contains("debounced") { mergeCount += 1 }
+        }
+    }
+    sem1.wait()
+    guard case .ingested(let id, let digest) = out1 else {
+        check(false, "开 C1 打字 → 采集入库（实际 \(out1)）")
+        exit(1)
+    }
+    check(id > 0 && W12Digest.isSummaryOnly(digest), "采集入库 event_id=\(id) digest=摘要（不含全文）")
+    check(mergeCount == 5, "同一输入会话内合并（防抖窗内 5 键 → debounced ×\(mergeCount)/5）")
+    Thread.sleep(forTimeInterval: 0.05)
+    let ocrRows = rows().filter { $0.ocrDigest != nil }
+    check(ocrRows.count == 1, "采集日志出现 screen+OCR 条目（ocrDigest 非空 ×\(ocrRows.count)）")
+    check(ocrRows.allSatisfy { $0.textIn.isEmpty && $0.textOut.isEmpty }, "OCR 条目原文零落库（text_in/out 空）")
+    check(!ocrRows.contains { $0.ocrDigest!.contains("W27SCREENMARK") }, "digest 列绝不含 OCR 全文")
+
+    // SuggestContext 带屏幕文本（提词浮层/智能候选请求链捕获断言）
+    let ctx = collector.makeSuggestContext(
+        beforeCursor: "开会", appId: appId, fromVoice: false, secureInput: false)
+    check(!ctx.screenText.isEmpty, "SuggestContext.screenText 非空（近期 OCR 摘要）")
+    check(ctx.screenText.contains("W27SCREENMARK"), "screenText 含屏幕 OCR 内容（截断拼接策略生效）")
+    let backend = W27CaptureBackend()
+    runAsync {
+        await W12PrompterModel().run(ctx: ctx, backend: backend, timeout: 0.8)
+    }
+    check(backend.seen?.screenText == ctx.screenText && !(backend.seen?.screenText.isEmpty ?? true),
+          "⌥Esc 提词浮层请求链捕获到 screen_text（注入探针断言）")
+
+    // ---- 场景 3：密码框 → 零采集
+    Thread.sleep(forTimeInterval: 0.7)  // 出防抖窗
+    let base2 = rows().count
+    let out3 = fireEvent(.keystroke, secureInput: true)
+    check(rows().count == base2, "密码框（secure input）→ 零采集")
+    if case .refused(let r) = out3 { check(r.contains("secure"), "密码框拒收原因：\(r)") }
+    else { check(false, "密码框应 refused（实际 \(out3)）") }
+    let ctxSecure = collector.makeSuggestContext(
+        beforeCursor: "密码", appId: appId, secureInput: true)
+    check(ctxSecure.screenText.isEmpty, "密码框 → SuggestContext.screenText 空（零带出）")
+
+    // ---- 场景 4：熔断 → 零采集
+    Thread.sleep(forTimeInterval: 0.7)
+    bridge.breaker.trip()
+    let base3 = rows().count
+    let out4 = fireEvent(.keystroke, secureInput: false)
+    check(rows().count == base3, "熔断 → 零采集")
+    if case .refused(let r) = out4 { check(r.contains("circuit breaker"), "熔断拒收原因：\(r)") }
+    else { check(false, "熔断应 refused（实际 \(out4)）") }
+    let ctxBreaker = collector.makeSuggestContext(beforeCursor: "x", appId: appId)
+    check(ctxBreaker.screenText.isEmpty, "熔断 → SuggestContext.screenText 空")
+    bridge.breaker.reset()
+
+    // ---- 场景 5：PTT 语音触发（右⌘/⌃⌥M 同一入口）→ 即时读屏
+    Thread.sleep(forTimeInterval: 0.7)
+    let base4 = rows().count
+    let out5 = fireEvent(.pttStart, secureInput: false)
+    check(rows().count == base4 + 1, "PTT 语音触发（onInputEvent .pttStart）→ 即时读屏入库")
+    if case .ingested = out5 {} else { check(false, "pttStart 应 ingested（实际 \(out5)）") }
+    _ = fireEvent(.pttEnd, secureInput: false)
+    check(true, "pttEnd 收口触发窗（不采集）")
+
+    print("== 结果：\(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ==")
+    exit(failures == 0 ? 0 : 1)
+}
+
+/// 注入截屏帧生成（等价一帧截屏；同一 OCR→摘要→入库链路的输入源）。
+enum W27ProbeImage {
+    static func make(marker: String) throws -> URL {
+        let img = NSImage(size: NSSize(width: 800, height: 200))
+        img.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 800, height: 200).fill()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 40), .foregroundColor: NSColor.black]
+        (marker as NSString).draw(at: NSPoint(x: 20, y: 80), withAttributes: attrs)
+        img.unlockFocus()
+        let png = NSBitmapImageRep(data: img.tiffRepresentation!)!
+            .representation(using: .png, properties: [:])!
+        let url = URL(fileURLWithPath: NSTemporaryDirectory() + "w27-frame-\(UUID().uuidString).png")
+        try png.write(to: url)
+        return url
+    }
+}
+
 // ------------------------------------------------------------ main
 
 let args = Array(CommandLine.arguments.dropFirst())
 guard let cmd = args.first else {
     print("""
-    usage: w12ctl <privacy|c1|bridge|prompter|breaker|hub-token> ...
+    usage: w12ctl <privacy|c1|bridge|prompter|breaker|hub-token|w27-e2e> ...
       privacy status | privacy c1 on|off
       c1 status | c1 gen-image <png> | c1 ocr --image <png> | c1 capture --source screen
       c1 asr --wav <wav> | c1 trigger --keys N [--image <png>]
@@ -357,6 +511,7 @@ guard let cmd = args.first else {
       prompter --backend hub|null [--token T] [--text S] [--adopt N] [--from-voice]
       breaker trip|reset|status
       hub-token --username u --password p [--url http://localhost:8088]
+      w27-e2e  （W27 注入探针：开C1打字→screen+OCR+屏幕文本 / 关C1 / 密码框 / 熔断 / PTT 五场景断言）
     全局: --db <sqlite 路径>（默认 ~/Library/Application Support/mine-input/interaction.db）
     """)
     exit(0)
@@ -369,6 +524,7 @@ case "bridge": cmdBridge(rest)
 case "prompter": cmdPrompter(rest)
 case "breaker": cmdBreaker(rest)
 case "hub-token": cmdHubToken(rest)
+case "w27-e2e": cmdW27E2E(rest)
 default:
     print("unknown command: \(cmd)")
     exit(2)

@@ -39,21 +39,29 @@ public struct SuggestUpdate {
     }
 }
 
-/// 调用上下文（hub SuggestIn 同构：before_cursor/app_id/from_voice/context_digest）。
+/// 调用上下文（hub SuggestIn 同构：before_cursor/app_id/from_voice/context_digest +
+/// W27 screen_text）。`screenText` = 近期 OCR 摘要（ScreenTextContext 截断拼接策略：
+/// 单帧头部 400 字符、环留 3 帧、新→旧拼接、总量头部 1200 字符）；C1 显式开启且
+/// 非密码框/熔断时才非空（填充方：W12C1Collector.makeSuggestContext），空串 = 无屏幕上下文。
 public struct SuggestContext {
     public var beforeCursor: String
     public var appId: String
     public var fromVoice: Bool
     public var contextDigest: String
+    /// W27 屏幕文本（近期 OCR 摘要）。屏幕文本只进本地/自建 Hub（screen_text 字段），
+    /// 绝不上报第三方；默认空串（C1 默认关）。
+    public var screenText: String
 
     public init(
         beforeCursor: String, appId: String = "",
-        fromVoice: Bool = false, contextDigest: String = ""
+        fromVoice: Bool = false, contextDigest: String = "",
+        screenText: String = ""
     ) {
         self.beforeCursor = beforeCursor
         self.appId = appId
         self.fromVoice = fromVoice
         self.contextDigest = contextDigest
+        self.screenText = screenText
     }
 }
 
@@ -108,6 +116,19 @@ public struct HubSuggestBackend: SuggestBackend {
         self.session = session
     }
 
+    /// /v1/suggest 请求体（纯函数，可单测）：before_cursor/app_id/from_voice/
+    /// context_digest + W27 screen_text（近期 OCR 摘要；空串也带键，契约稳定）。
+    /// 屏幕文本只进用户自建 Hub（base_url），绝不上报第三方。
+    public static func requestBody(_ ctx: SuggestContext) -> [String: Any] {
+        [
+            "before_cursor": ctx.beforeCursor,
+            "app_id": ctx.appId,
+            "from_voice": ctx.fromVoice,
+            "context_digest": ctx.contextDigest,
+            "screen_text": ctx.screenText,
+        ]
+    }
+
     public func suggest(
         ctx: SuggestContext,
         timeout: TimeInterval,
@@ -118,12 +139,7 @@ public struct HubSuggestBackend: SuggestBackend {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "before_cursor": ctx.beforeCursor,
-            "app_id": ctx.appId,
-            "from_voice": ctx.fromVoice,
-            "context_digest": ctx.contextDigest,
-        ])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: Self.requestBody(ctx))
 
         let finished = FinishedFlag()
         // NFR3：800ms 超时弃本轮（可用 timeout 覆盖），超时补 kTimeout 终止。

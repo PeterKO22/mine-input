@@ -29,21 +29,26 @@ public final class W12PrompterOverlay {
     public var isVisible: Bool { panel?.isVisible ?? false }
 
     /// 唤起/收起（⌥Esc 感应点：IME 热键，README「⌥Esc 感应点」表 #2）。
+    /// `screenText`：W27 屏幕文本（近期 OCR 摘要）进 SuggestContext 请求链。
     public func toggle(beforeCursor: String, appId: String, fromVoice: Bool,
+                       screenText: String = "",
                        backend: SuggestBackend, timeout: TimeInterval = 0.8) {
         if isVisible {
             close()
         } else {
             show(beforeCursor: beforeCursor, appId: appId, fromVoice: fromVoice,
-                 backend: backend, timeout: timeout)
+                 screenText: screenText, backend: backend, timeout: timeout)
         }
     }
 
     public func show(beforeCursor: String, appId: String, fromVoice: Bool,
+                     screenText: String = "",
                      backend: SuggestBackend, timeout: TimeInterval = 0.8) {
         model = W12PrompterModel()
         self.backend = backend
-        ctx = SuggestContext(beforeCursor: beforeCursor, appId: appId, fromVoice: fromVoice)
+        ctx = SuggestContext(
+            beforeCursor: beforeCursor, appId: appId, fromVoice: fromVoice,
+            screenText: screenText)
         ensurePanel()
         panel?.orderFrontRegardless()
         refreshPanel()

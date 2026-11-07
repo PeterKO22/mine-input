@@ -76,6 +76,15 @@ public struct W12Settings {
 /// C1 显式开关（持久在 InteractionStore meta，跨进程生效；默认关）。
 /// 语义与 W9 `enableClipboardCollection(explicitConfirm:)` 同构：不显式确认就拒绝开启。
 public enum W12Privacy {
+    /// W27 首次开启确认文案标题（⌥M 管理浮层开启 C1 时弹出）。
+    public static let consentTitle = "开启 C1 屏幕/语音采集？"
+    /// W27 首次开启确认文案（用途 / 范围 / 随时可关；三项说清才可开启）。
+    public static let consentText = """
+    用途：在你按键或按住语音键输入时读取屏幕（快照→OCR 文本），用于智能候选与提词的理解与推荐。仅输入时触发（防抖 1–2s），无持续录音、不落原图。
+    范围：屏幕 OCR 文本摘要 + 语音转写摘要，只进本地上下文/记忆与你自己配置的 Hub（本地/自建），绝不上报第三方（无遥测）。
+    随时可关：⌥M「记忆管理」一键关闭（关闭即清屏幕上下文）；密码框/支付自动停采不可关；一键熔断立即停；一键清空含记忆层。
+    """
+
     /// 显式开启 C1 采集（explicitConfirm 必须为 true，模拟「用户知情同意」）。
     @discardableResult
     public static func enableC1(store: InteractionStore, explicitConfirm: Bool) -> Bool {
@@ -86,6 +95,8 @@ public enum W12Privacy {
 
     public static func disableC1(store: InteractionStore) {
         store.metaSet("c1_enabled", "0")
+        // W27：关闭即失忆——屏幕文本上下文环一并清空（随时可关的落法）。
+        ScreenTextContext.shared.clear()
     }
 
     /// 运行时显式开关状态（meta）。

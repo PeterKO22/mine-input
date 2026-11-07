@@ -5,6 +5,16 @@ import Foundation
 import ContextCore
 #endif
 
+/// W27 统一输入事件（按键/语音快捷键 → 读屏的触发源）。
+public enum W12InputTrigger: Equatable {
+    /// 按键事件（SquirrelInputController.handle() keyDown）。
+    case keystroke
+    /// PTT 语音触发（右⌘按住 / ⌃⌥M 兜底键按下）：开语音触发窗 + 即时读屏。
+    case pttStart
+    /// PTT 结束（松开上屏/取消）：收口触发窗。
+    case pttEnd
+}
+
 /// W12 C1 采集编排（任务书 (a)）：
 ///
 /// 触发（**仅输入时**）：PTT 期间 + 按键触发窗（用户正在打字），防抖 2s
@@ -59,6 +69,11 @@ public final class W12C1Collector {
 
     public let bridge: W12EventBridge
     public var settings: W12Settings
+    /// W27 屏幕文本上下文存储（OCR 全文 → 截断摘要入环；默认进程内单例，测试可注入）。
+    public var screenContext: ScreenTextContext = .shared
+    /// W27 注入探针/测试用：非 nil 时采集走该源（文件源=等价一帧截屏，同一 OCR→摘要→
+    /// 入库链路）；生产恒 nil（走 .screen ScreenCaptureKit）。
+    public var captureSourceOverride: W12CaptureSource? = nil
     private let lock = NSLock()
     private var lastCaptureAt: TimeInterval? = nil
     private var lastKeyAt: TimeInterval? = nil
@@ -76,12 +91,46 @@ public final class W12C1Collector {
 
     // ------------------------------------------------------------ 触发
 
-    /// 按键触发（Squirrel handle() 每次 keyDown 调用）：防抖 2s，触发一轮屏幕采集。
-    /// secureInput 由 IME 侧传入（IsSecureEventInputEnabled()，密码框自动停）。
-    public func noteKeystroke(
+    /// W27 统一输入事件入口（任务书 (1)）：**SquirrelInputController 按键事件**与
+    /// **PTT 语音触发（右⌘按住 / ⌃⌥M 兜底键）**都走本入口。
+    ///
+    /// 防抖与合并：防抖 1–2s（`settings.debounceSeconds`，默认 2s）；同一输入会话
+    /// （按键/PTT 触发间隙 ≤ 防抖窗的连续事件段）内的多次触发**合并为一轮采集**
+    /// ——防抖窗内至多一轮（NFR5「采集防抖不耗电」），窗口外的持续输入每窗最多一轮。
+    ///
+    /// 语义：
+    ///   - `.keystroke`：按键触发窗 + 防抖 → 屏幕快照→Vision OCR→上下文存储；
+    ///   - `.pttStart`：PTT 语音触发（右⌘按下 / ⌃⌥M）——打开语音触发窗（pttActive）
+    ///     **并**即时触发一轮屏幕采集（「按键（包括语音快捷键）即读取屏幕」）；
+    ///   - `.pttEnd`：PTT 结束收口触发窗（不采集）。
+    ///
+    /// 门禁照旧：C1 显式开关（默认关）/ 密码框（secureInput）零采集 / 熔断立即停 /
+    /// 黑名单跳过。
+    public func onInputEvent(
+        _ trigger: W12InputTrigger,
         appId: String?, secureInput: Bool,
         completion: ((Outcome) -> Void)? = nil
     ) {
+        switch trigger {
+        case .pttEnd:
+            lock.lock(); pttActive = false; lock.unlock()
+            completion?(.skipped("ptt end (input window closed)"))
+            return
+        case .pttStart:
+            lock.lock(); pttActive = true; lock.unlock()
+        case .keystroke:
+            break
+        }
+        // C1 总开关关（默认关）→ 直接拒：零采集零副作用，不触碰防抖状态
+        //（开启 C1 后的首个按键立即可采，不被关着时的按键挤占防抖窗）。
+        guard isC1Enabled else {
+            completion?(.refused("C1 collection disabled (default off; 需显式开启)"))
+            return
+        }
+        guard settings.c1Screen else {
+            completion?(.skipped("c1 screen sub-switch off"))
+            return
+        }
         let now = Date().timeIntervalSince1970
         lock.lock()
         lastKeyAt = now
@@ -94,29 +143,30 @@ public final class W12C1Collector {
             completion?(.skipped(decision.reason))
             return
         }
-        guard isC1Enabled else {
-            completion?(.refused("C1 collection disabled (default off; 需显式开启)"))
-            return
-        }
-        guard settings.c1Screen else {
-            completion?(.skipped("c1 screen sub-switch off"))
-            return
-        }
         Task {
             let outcome = await self.captureAndIngest(
-                source: .screen, kind: .keySession,
+                source: self.captureSourceOverride ?? .screen, kind: .keySession,
                 appId: appId, secureInput: secureInput)
             completion?(outcome)
         }
     }
 
+    /// 按键触发（Squirrel handle() 每次 keyDown 调用）：W27 起统一转发 `onInputEvent`。
+    /// secureInput 由 IME 侧传入（IsSecureEventInputEnabled()，密码框自动停）。
+    public func noteKeystroke(
+        appId: String?, secureInput: Bool,
+        completion: ((Outcome) -> Void)? = nil
+    ) {
+        onInputEvent(.keystroke, appId: appId, secureInput: secureInput, completion: completion)
+    }
+
     /// PTT 语音会话窗口（W7PttController.start/stop 调用）。
     public func notePttStart() {
-        lock.lock(); pttActive = true; lock.unlock()
+        onInputEvent(.pttStart, appId: nil, secureInput: false)
     }
 
     public func notePttEnd() {
-        lock.lock(); pttActive = false; lock.unlock()
+        onInputEvent(.pttEnd, appId: nil, secureInput: false)
     }
 
     /// PTT 转写落定（W2 管线输出）→ **W7×W9 接线：语音会话事件一律上报**
@@ -167,10 +217,14 @@ public final class W12C1Collector {
         } catch {
             return .refused("ocr failed: \(error)")
         }
-        // OCR 全文只在内存到此为止（摘要已算出）；入库前再查熔断（立即停）。
+        // OCR 全文只在内存参与摘要/上下文截断，随即丢弃（不落原图、不落全文入库）；
+        // 入库前再查熔断（立即停）——熔断拒收时也不入屏幕上下文环。
         if bridge.breaker.isTripped {
             return .refused("circuit breaker tripped: collection stopped")
         }
+        // W27：OCR 文本摘要化进屏幕文本上下文存储（ScreenTextContext 环，仅内存），
+        // 供推荐链（SuggestContext.screenText）与记忆层情境（situation.screen_text）。
+        screenContext.noteOCR(ocr.text)
         let r = bridge.reportC1Sample(
             kind: kind, ocrDigest: ocr.digestSummary,
             appId: appId, secureInput: secureInput)
@@ -235,5 +289,26 @@ public final class W12C1Collector {
         lock.lock()
         lastCaptureAt = Date().timeIntervalSince1970
         lock.unlock()
+    }
+
+    // ------------------------------------------------------------ 推荐链上下文
+
+    /// 构造推荐链请求上下文（智能候选 / ⌥Esc 提词浮层共用的 SuggestContext 请求链）：
+    /// `screenText` = 近期 OCR 摘要（ScreenTextContext 截断拼接），**仅当**
+    /// C1 显式开启、未熔断、非密码框（secureInput）时填充；任一不满足即空串
+    /// （C1 默认关 → 默认空串，屏幕文本绝不上报第三方）。
+    public func makeSuggestContext(
+        beforeCursor: String, appId: String = "",
+        fromVoice: Bool = false, secureInput: Bool = false
+    ) -> SuggestContext {
+        let screenText: String
+        if isC1Enabled, !bridge.breaker.isTripped, !secureInput {
+            screenText = screenContext.recentSummary()
+        } else {
+            screenText = ""
+        }
+        return SuggestContext(
+            beforeCursor: beforeCursor, appId: appId,
+            fromVoice: fromVoice, screenText: screenText)
     }
 }

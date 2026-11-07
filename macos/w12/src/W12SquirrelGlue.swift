@@ -55,9 +55,12 @@ final class W12SquirrelHooks {
             }
         }
 
-        // C1 输入触发（仅输入时 + 防抖 2s；密码框 IsSecureEventInputEnabled 自动停）
+        // C1 输入触发（仅输入时 + 防抖 1–2s；密码框 IsSecureEventInputEnabled 自动停）。
+        // W27 接线：SquirrelInputController 按键事件 → W12C1Collector.onInputEvent()
+        //（统一入口：屏幕快照→Vision OCR→上下文存储，同一输入会话内合并）。
         if event.type == .keyDown {
-            c1.noteKeystroke(
+            c1.onInputEvent(
+                .keystroke,
                 appId: appId,
                 secureInput: IsSecureEventInputEnabled(),
                 completion: nil)
@@ -78,9 +81,16 @@ final class W12SquirrelHooks {
         overlay.onAdopt = { chosen, _ in
             controller.w12CommitAdopted(chosen.text)  // 采纳才上屏（model 已入库 feedback）
         }
+        // W27 推荐链：SuggestContext 带屏幕文本（近期 OCR 摘要）——C1 开且非密码框/
+        // 未熔断才填充（makeSuggestContext 门禁），空串 = 无屏幕上下文。
+        let ctx = c1.makeSuggestContext(
+            beforeCursor: preedit, appId: appId,
+            fromVoice: W7PttController.shared.isCapturing,
+            secureInput: IsSecureEventInputEnabled())
         overlay.toggle(
             beforeCursor: preedit, appId: appId,
             fromVoice: W7PttController.shared.isCapturing,
+            screenText: ctx.screenText,
             backend: backend)
     }
 
@@ -116,8 +126,10 @@ final class W12SquirrelHooks {
             text, appId: appId, secureInput: IsSecureEventInputEnabled())
     }
 
-    /// PTT 窗口（W7PttController.start/stop 调用）：C1 仅输入时触发的语音窗。
-    func notePttStart() { c1.notePttStart() }
-    func notePttEnd() { c1.notePttEnd() }
+    /// PTT 窗口（W7PttController.start/stop 调用）：W27 起 PTT 语音触发（右⌘按住 /
+    /// ⌃⌥M 兜底键）同样走 W12C1Collector.onInputEvent() ——「按键（包括语音快捷键）
+    /// 即读取屏幕」（.pttStart 开窗并即时读屏，.pttEnd 收口）。
+    func notePttStart() { c1.onInputEvent(.pttStart, appId: nil, secureInput: false) }
+    func notePttEnd() { c1.onInputEvent(.pttEnd, appId: nil, secureInput: false) }
 }
 #endif

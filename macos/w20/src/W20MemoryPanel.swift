@@ -17,6 +17,8 @@ public final class W20MemoryPanel: NSObject {
     private let store: W20MemoryStore
     private let breaker: W20BreakerControl?
     private let engine: W20ProposalEngine
+    /// W27：C1 屏幕/语音采集开关（⌥M 管理浮层 C1 开关与状态显示；nil = 无 C1 面，隐藏）。
+    private let c1Control: W20C1Control?
 
     private var panel: NSPanel?
     private var filtered: [W20MemoryEntry] = []
@@ -28,6 +30,10 @@ public final class W20MemoryPanel: NSObject {
     private let countsLabel = NSTextField(labelWithString: "")
     private let breakerSwitch = NSSwitch()
     private let breakerLabel = NSTextField(labelWithString: "一键熔断")
+    // W27：C1 开关 + 状态显示
+    private let c1StatusLabel = NSTextField(labelWithString: "")
+    private let c1Label = NSTextField(labelWithString: "C1 屏幕/语音")
+    private let c1Switch = NSSwitch()
 
     // 记忆时间线
     private let searchField = NSSearchField()
@@ -46,10 +52,11 @@ public final class W20MemoryPanel: NSObject {
     private let tabControl = NSSegmentedControl()
 
     public init(store: W20MemoryStore, breaker: W20BreakerControl?,
-                engine: W20ProposalEngine) {
+                engine: W20ProposalEngine, c1Control: W20C1Control? = nil) {
         self.store = store
         self.breaker = breaker
         self.engine = engine
+        self.c1Control = c1Control
         super.init()
     }
 
@@ -105,9 +112,21 @@ public final class W20MemoryPanel: NSObject {
         breakerLabel.textColor = W20Color.dimText
         breakerSwitch.target = self
         breakerSwitch.action = #selector(onBreakerToggled)
+        // W27：C1 开关 + 状态显示（首次开启弹 W12Privacy 确认文案，确认后才开）
+        c1StatusLabel.font = W20Font.mono(11)
+        c1StatusLabel.textColor = W20Color.cyan
+        c1Label.font = W20Font.body()
+        c1Label.textColor = W20Color.dimText
+        c1Switch.target = self
+        c1Switch.action = #selector(onC1Toggled)
+        let hasC1 = c1Control != nil
+        c1StatusLabel.isHidden = !hasC1
+        c1Label.isHidden = !hasC1
+        c1Switch.isHidden = !hasC1
 
         let topRow = NSStackView(views: [
-            statusDot, statusLabel, countsLabel, NSView(), breakerLabel, breakerSwitch,
+            statusDot, statusLabel, countsLabel, NSView(),
+            c1StatusLabel, c1Label, c1Switch, breakerLabel, breakerSwitch,
         ])
         topRow.orientation = .horizontal
         topRow.spacing = 10
@@ -317,6 +336,11 @@ public final class W20MemoryPanel: NSObject {
         statusLabel.stringValue = "采集状态：\(s.label)"
         countsLabel.stringValue = "今日 \(s.todayCount) 条 · 累计 \(s.totalCount) 条"
         breakerSwitch.state = s.breakerTripped ? .on : .off
+        // W27：C1 开关与状态显示
+        if let c1 = c1Control {
+            c1Switch.state = c1.isC1Enabled ? .on : .off
+            c1StatusLabel.stringValue = c1.statusText
+        }
     }
 
     private func refreshTimeline() {
@@ -479,6 +503,28 @@ public final class W20MemoryPanel: NSObject {
             breaker.trip()   // 一键熔断：立即停采集
         } else {
             breaker.reset()
+        }
+        refreshStatus()
+    }
+
+    /// W27：C1 屏幕/语音采集开关。开启走**首次确认弹窗**（W12Privacy 确认文案：
+    /// 用途/范围/随时可关），确认后才 `setEnabled(true, explicitConfirm: true)`；
+    /// 取消则开关拨回（绝不静默开启）。关闭即清屏幕上下文（W12Privacy.disableC1）。
+    @objc private func onC1Toggled() {
+        guard let c1 = c1Control else { return }
+        if c1Switch.state == .on {
+            let alert = NSAlert()
+            alert.messageText = "开启 C1 屏幕/语音采集？"
+            alert.informativeText = c1.consentText
+            alert.addButton(withTitle: "开启")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                c1.setEnabled(true, explicitConfirm: true)
+            } else {
+                c1Switch.state = .off  // 未确认 = 不开启
+            }
+        } else {
+            c1.setEnabled(false, explicitConfirm: true)
         }
         refreshStatus()
     }

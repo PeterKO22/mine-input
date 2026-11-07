@@ -37,9 +37,12 @@ public enum MemoryPairing {
     }
 
     /// 纯函数：事件流 → 记忆（不落盘；落盘交给 MemoryStore.append，熔断/清空/编辑同样管辖）。
+    /// - Parameter screenText: W27 屏幕上下文（近期 OCR 摘要，ScreenTextContext 摘要串），
+    ///   仅附到 consent=c1 的记录（situation.screen_text，本地记忆；调用方在配对时注入）。
     public static func pair(
         events: [InteractionEvent],
-        options: Options = Options()
+        options: Options = Options(),
+        screenText: String? = nil
     ) -> Outcome {
         // 时间正序（稳定）；事件流按 ts 索引即天然有序。
         let sorted = events.enumerated()
@@ -110,6 +113,8 @@ public enum MemoryPairing {
                     screenDigest: nil,
                     ocrDigest: ocr,
                     asrDigest: asr,
+                    screenText: (ocr != nil || asr != nil)
+                        ? (screenText?.isEmpty == false ? screenText : nil) : nil,
                     thread: thread),
                 myReply: MyReply(
                     text: commit.textOut,

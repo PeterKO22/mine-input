@@ -1,0 +1,44 @@
+# W27 screen-context 集成补丁（可复现记录；前置 squirrel-w12.patch + squirrel-w20.patch）
+#
+# 修改 Squirrel 既有 1 文件：
+#   - Squirrel.xcodeproj/project.pbxproj：编入 ../../context/Sources/ContextCore/
+#     ScreenTextContext.swift（W27 屏幕文本上下文存储，FA77/FA78 id）——
+#     按键/语音 → 读屏 → 上下文存储 → 推荐链（SuggestContext.screen_text）的上下文侧。
+#
+# 应用方式：在已套用 dev+w7+w12+w20+w26 补丁的 macos/squirrel 上
+#   git apply macos/w27/squirrel-w27.patch
+# （context/Sources/ContextCore 为新增源码唯一事实源，pbxproj 直接引用。）
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -123,6 +123,7 @@
+ 		FA720000000000000000000D /* CircuitBreaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000D /* CircuitBreaker.swift */; };
+ 		FA720000000000000000000E /* C0Collector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000E /* C0Collector.swift */; };
+ 		FA720000000000000000000F /* SuggestClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000F /* SuggestClient.swift */; };
++		FA7800000000000000000001 /* ScreenTextContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7700000000000000000001 /* ScreenTextContext.swift */; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXCopyFilesBuildPhase section */
+@@ -365,6 +366,7 @@
+ 		FA710000000000000000000D /* CircuitBreaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CircuitBreaker.swift; path = ../../context/Sources/ContextCore/CircuitBreaker.swift; sourceTree = "<group>"; };
+ 		FA710000000000000000000E /* C0Collector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = C0Collector.swift; path = ../../context/Sources/ContextCore/C0Collector.swift; sourceTree = "<group>"; };
+ 		FA710000000000000000000F /* SuggestClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SuggestClient.swift; path = ../../context/Sources/ContextCore/SuggestClient.swift; sourceTree = "<group>"; };
++		FA7700000000000000000001 /* ScreenTextContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScreenTextContext.swift; path = ../../context/Sources/ContextCore/ScreenTextContext.swift; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -426,6 +428,7 @@
+ 				FA710000000000000000000D /* CircuitBreaker.swift */,
+ 				FA710000000000000000000E /* C0Collector.swift */,
+ 				FA710000000000000000000F /* SuggestClient.swift */,
++				FA7700000000000000000001 /* ScreenTextContext.swift */,
+ 			);
+ 			name = Sources;
+ 			sourceTree = "<group>";
+@@ -720,6 +723,7 @@
+ 				FA720000000000000000000D /* CircuitBreaker.swift in Sources */,
+ 				FA720000000000000000000E /* C0Collector.swift in Sources */,
+ 				FA720000000000000000000F /* SuggestClient.swift in Sources */,
++				FA7800000000000000000001 /* ScreenTextContext.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};

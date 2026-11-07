@@ -26,15 +26,19 @@ public struct W20Situation: Codable, Equatable {
     public var screenDigest: String?
     public var ocrDigest: String?
     public var asrDigest: String?
+    /// W27 屏幕上下文（screen_text，近期 OCR 摘要；仅本地记忆）。编辑重写必须
+    /// 携带本字段，否则丢字段（schema §15.1 W27 扩展键）。
+    public var screenText: String?
     public var thread: [String]?
 
     public init(beforeCursor: String? = nil, screenDigest: String? = nil,
                 ocrDigest: String? = nil, asrDigest: String? = nil,
-                thread: [String]? = nil) {
+                screenText: String? = nil, thread: [String]? = nil) {
         self.beforeCursor = beforeCursor
         self.screenDigest = screenDigest
         self.ocrDigest = ocrDigest
         self.asrDigest = asrDigest
+        self.screenText = screenText
         self.thread = thread
     }
 
@@ -43,6 +47,7 @@ public struct W20Situation: Codable, Equatable {
         case screenDigest = "screen_digest"
         case ocrDigest = "ocr_digest"
         case asrDigest = "asr_digest"
+        case screenText = "screen_text"
         case thread
     }
 }
@@ -112,6 +117,7 @@ public struct W20MemoryEntry: Codable, Equatable {
         var parts: [String] = []
         if let t = myReply?.text { parts.append(t) }
         if let b = situation?.beforeCursor { parts.append(b) }
+        if let s = situation?.screenText { parts.append(s) }
         if let th = situation?.thread { parts.append(th.joined(separator: "\n")) }
         return parts.joined(separator: "\n")
     }
@@ -125,6 +131,21 @@ public protocol W20BreakerControl: AnyObject {
     var isTripped: Bool { get }
     func trip()    // 一键熔断：立即停采集（W19 熔断停记同源）
     func reset()   // 解除熔断（显式操作才恢复）
+}
+
+/// W27 C1 采集开关控制抽象（⌥M 管理浮层「C1 屏幕/语音采集」开关 + 状态显示的数据源）。
+/// 生产实现 = W12Privacy/W12C1Collector（W20SquirrelGlue 注入）；测试用桩。
+/// 首次开启须经 `consentText` 确认弹窗（UI 层弹，确认后才调 setEnabled(true)）。
+public protocol W20C1Control: AnyObject {
+    /// 当前 C1 开关态（显式开关，默认关）。
+    var isC1Enabled: Bool { get }
+    /// 首次开启确认文案（用途/范围/随时可关）。
+    var consentText: String { get }
+    /// 状态显示行（如「C1：关（默认，未采集）」）。
+    var statusText: String { get }
+    /// 开关（explicitConfirm 必须为 true 才允许开启——UI 确认弹窗后传入）。
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool
 }
 
 public struct W20CollectionStatus: Equatable {

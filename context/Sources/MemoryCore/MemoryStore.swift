@@ -117,6 +117,7 @@ public final class MemoryStore {
                 }
                 if let kw = keyword, !kw.isEmpty {
                     let hay = (rec.situation.beforeCursor + "\n" + rec.myReply.text + "\n"
+                        + (rec.situation.screenText ?? "") + "\n"
                         + rec.situation.thread.joined(separator: "\n")).lowercased()
                     if !hay.contains(kw.lowercased()) { return false }
                 }
@@ -310,13 +311,15 @@ public final class MemoryStore {
 
 // ------------------------------------------------------------ 隐私联动（(c)）
 
-/// 一键清空：**事件层 + 记忆层同清**（§15.1 隐私联动）。
+/// 一键清空：**事件层 + 记忆层 + 屏幕上下文环同清**（§15.1 隐私联动 + W27 屏幕上下文）。
 public enum MemoryPrivacy {
     public static func clearAll(
         memory: MemoryStore, events: InteractionStore
     ) -> (memories: Int, events: Int) {
         let m = memory.clearAll()
         let e = events.clearAll()
+        // W27：屏幕上下文环（ScreenTextContext，内存）一并清空——一键清空即失忆。
+        ScreenTextContext.shared.clear()
         return (m, e)
     }
 }
