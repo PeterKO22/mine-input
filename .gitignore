@@ -19,4 +19,5 @@ macos/w20/.demo/
 macos/w18/tis-probe
 macos/w26/w26-probe
 # 4) 系统杂物
-.DS_Store
+22|.DS_Store
+build/logs/

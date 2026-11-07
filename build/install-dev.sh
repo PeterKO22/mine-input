@@ -19,6 +19,17 @@ RIME_DIR="$HOME/Library/Rime-mine-dev"
   echo "missing $APP_SRC —— 先跑 bash build/build-squirrel.sh"; exit 1
 }
 
+# W26 事故门：正在使用该输入法时替换 bundle 会把会话级 TIS 注册干掉（输入源从清单
+# 消失、切不过去，需手动重添加或注销重登）。当前输入源是它就先劝退。
+if defaults read com.apple.HIToolbox AppleSelectedInputSources 2>/dev/null | grep -q "Squirrel.dev"; then
+  if [ "${FORCE_INSTALL:-0}" != "1" ]; then
+    echo "ERROR: 「提炼输入法」正在使用中——请先切换到其他输入法（Ctrl+Space）再安装。" >&2
+    echo "  （确要强制：FORCE_INSTALL=1 bash build/install-dev.sh）" >&2
+    exit 1
+  fi
+  echo "WARN: FORCE_INSTALL=1，输入法使用中仍强制替换（可能触发 TIS 暂清）。" >&2
+fi
+
 echo "== [1/5] 安装 $APP_DST =="
 mkdir -p "$IM_DIR"
 # W18 坑：替换 bundle 前先停掉旧 dev IME 进程——否则旧进程占着已删除的 inode，
@@ -74,6 +85,24 @@ echo "IME 进程存活: pid=$IME_PID"
 echo "-- IMK 端口注册证据（InputMethodConnectionName=Squirrel_Dev_Connection，unified log）--"
 log show --last 1m --predicate 'process == "Squirrel"' --style compact 2>/dev/null \
   | grep -E "inputmethodkit|Activate Server" | tail -3 || true
+
+echo "== [4b/5] TIS 可见性硬门（W26 事故：切不到输入法）=="
+# 实测事故：bundle/签名/进程全好，但会话级 TIS 清单丢了输入源——用户切不到输入法。
+# 装完必须探针 PASS 才算数；FAIL 给恢复路径并中止（TIS_GATE=0 可跳过）。
+if [ "${TIS_GATE:-1}" != "0" ]; then
+  TIS_OUT="$("$ROOT/macos/w18/tis-probe" 2>/dev/null || true)"
+  if ! printf '%s' "$TIS_OUT" | grep -q "TIS PASS"; then
+    echo "ERROR: TIS 探针未通过——系统当前看不见输入源，用户会切不到输入法。" >&2
+    echo "  恢复路径（按序试）：" >&2
+    echo "  1) 系统设置→键盘→输入法→+ →中文→「提炼输入法」→添加（重建会话条目）" >&2
+    echo "  2) 仍不见：注销重登（或重启）刷新 TIS 会话缓存" >&2
+    echo "  （确要跳过：TIS_GATE=0 bash build/install-dev.sh）" >&2
+    exit 1
+  fi
+  echo "TIS 探针: PASS（系统可见，可切换）"
+else
+  echo "TIS 探针: 跳过（TIS_GATE=0）"
+fi
 
 echo "== [5/5] 手工测试步骤（TextEdit）=="
 cat <<'EOF'
