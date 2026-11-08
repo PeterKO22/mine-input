@@ -21,3 +21,10 @@ macos/w26/w26-probe
 # 4) 系统杂物
 22|.DS_Store
 build/logs/
+# W29 数据文件门：用户数据/演示数据永不入库
+*.db
+*.sqlite
+*.jsonl
+.demo/
+*.userdb
+memory/
