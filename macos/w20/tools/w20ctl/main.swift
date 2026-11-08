@@ -68,6 +68,26 @@ func makeBreaker(_ opts: Opts) -> CircuitBreaker? {
     return CircuitBreaker(store: store)
 }
 
+/// W29 panel-dump 桩：「记录我的回复（用于记忆与推荐）」开关数据源（界面形态可验）。
+/// 生产实现 = W20SquirrelGlue.W20SquirrelRetentionControl（W12Privacy 持久 meta 同源）。
+final class W29StubRetentionControl: W20RetentionControl {
+    var isRetentionEnabled = false
+    var consentTitle = "记录我的回复（用于记忆与推荐）？"
+    var consentText = """
+    留存什么：上屏回复文本与当时情境。干嘛用：本地「情境→回复」记忆（回忆/推荐）。
+    本地存储：只存本机，不进同步导出、无遥测。随时可关。清空连事件一起。
+    """
+    var statusText: String {
+        isRetentionEnabled ? "留存：开（新上屏回复入本地记忆）" : "留存：关（默认，回复不落库）"
+    }
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
+        guard explicitConfirm || !on else { return false }  // 开启必须显式确认
+        isRetentionEnabled = on
+        return true
+    }
+}
+
 func printEntry(_ e: W20MemoryEntry, verbose: Bool) {
     print("id=\(e.id)  ts=\(e.ts)  app=\(e.appId ?? "-")  consent=\(e.consent ?? "-")")
     if verbose {
@@ -181,7 +201,8 @@ func runPanelDump(_ opts: Opts) {
     app.setActivationPolicy(.accessory)
     let store = makeStore(opts)
     let panel = W20MemoryPanel(store: store, breaker: nil,
-                               engine: W20NullProposalEngine())
+                               engine: W20NullProposalEngine(),
+                               retentionControl: W29StubRetentionControl())
     panel.show()
     print(panel.debugDump())
     panel.close()

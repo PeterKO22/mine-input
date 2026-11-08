@@ -71,6 +71,9 @@ struct MemoryCtl {
         var options = MemoryPairing.Options()
         if let gap = args.flag("gap-ms").flatMap(Int64.init) { options.sessionGapMs = gap }
         if let dev = args.flag("device"), !dev.isEmpty { options.device = dev }
+        // W29：上屏文本留存（L3）持久开关（meta commit_text_retention，跨进程）注入
+        // 配对——决定 text_out 全空段归「真取消」还是「段内无留存回复」。
+        options.retentionEnabled = (events.metaGet("commit_text_retention") == "1")
 
         let outcome = MemoryPairing.pair(
             events: stream, options: options,
@@ -95,7 +98,13 @@ struct MemoryCtl {
         }
         print(
             "paired: \(outcome.sessionCount) sessions → \(outcome.memories.count) memories " +
-            "(\(outcome.cancelledCount) cancelled not recorded; appended=\(appended) dedup-skipped=\(skipped))")
+            "(段内无留存回复 \(outcome.noRetainedReplyCount) · 真取消 \(outcome.cancelledCount) not recorded; " +
+            "appended=\(appended) dedup-skipped=\(skipped))")
+        // W29 误导修复：留存未开时不再把「上屏但回复没留存」冒充「真取消」——
+        // 明示分开计数 + 如实提示（开后新会话才会配对）。
+        if outcome.noRetainedReplyCount > 0 && !options.retentionEnabled {
+            print(MemoryPairing.noRetainedReplyHint)
+        }
     }
 
     // ------------------------------------------------------------ query（--keyword/--app/--since）

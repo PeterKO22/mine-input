@@ -24,6 +24,8 @@ public struct W12Settings {
     /// C1 触发防抖（秒）：输入触发窗内至多一轮采集（任务书：防抖 2s）。
     public var debounceSeconds: TimeInterval
     /// 上屏文本留存（L3，默认关；与 W9 commitTextRetention 同语义）。
+    /// W29 起生产以持久开关（meta `commit_text_retention`，W12Privacy）为唯一事实源；
+    /// 本字段仅作探针/脚本直通（w12ctl --commit-retention）。
     public var commitTextRetention: Bool
 
     public init(
@@ -102,6 +104,38 @@ public enum W12Privacy {
     /// 运行时显式开关状态（meta）。
     public static func isC1ExplicitlyEnabled(store: InteractionStore) -> Bool {
         store.metaGet("c1_enabled") == "1"
+    }
+
+    // -------------------------------------------------------- W29 上屏文本留存（L3）
+
+    /// W29 首次开启确认文案标题（⌥M 管理浮层开启「记录我的回复」时弹出）。
+    public static let retentionConsentTitle = "记录我的回复（用于记忆与推荐）？"
+    /// W29 首次开启确认文案（留存什么 / 干嘛用 / 本地存储 / 随时可关 / 清空连事件一起——
+    /// 五项说清才可开启）。
+    public static let retentionConsentText = """
+    留存什么：你每次上屏的回复文本（text_out）与当时情境（输入框上下文、应用名；屏幕/语音摘要仅在 C1 开启时另附摘要）。
+    干嘛用：本地生成「情境→回复」记忆（JSONL），用于以后回忆、以及推荐/提词的理解；⌥M「记忆管理」可查、可改、可删。
+    本地存储：只存本机（~/Library/Application Support/mine-input/ 事件库+记忆库），不进同步/ingest 导出、无遥测、绝不上报第三方。
+    随时可关：⌥M 一键关闭（关闭后新事件不再留存；已有留存可删或一键清空）。
+    清空连事件一起：一键清空时事件层+记忆层同清；密码框/安全输入（secure input）恒不记录，不可关。
+    """
+
+    /// 显式开启上屏文本留存（explicitConfirm 必须为 true——UI 确认弹窗后传入）。
+    /// 持久在 InteractionStore meta（`commit_text_retention`），跨进程生效，默认关。
+    @discardableResult
+    public static func enableCommitTextRetention(store: InteractionStore, explicitConfirm: Bool) -> Bool {
+        guard explicitConfirm else { return false }
+        store.metaSet("commit_text_retention", "1")
+        return true
+    }
+
+    public static func disableCommitTextRetention(store: InteractionStore) {
+        store.metaSet("commit_text_retention", "0")
+    }
+
+    /// 运行时显式开关状态（meta 持久，跨进程；默认关）。
+    public static func isCommitTextRetentionEnabled(store: InteractionStore) -> Bool {
+        store.metaGet("commit_text_retention") == "1"
     }
 }
 

@@ -50,7 +50,8 @@ final class W20SquirrelHooks {
                 store: W20MemoryStore(),
                 breaker: W20SquirrelBreaker(),
                 engine: W20CppProposalEngine(),  // 提案卡接 C++ Null 提案桩
-                c1Control: W20SquirrelC1Control())  // W27：C1 开关 + 状态显示
+                c1Control: W20SquirrelC1Control(),  // W27：C1 开关 + 状态显示
+                retentionControl: W20SquirrelRetentionControl())  // W29：记录我的回复开关
         }
         panel?.show()
     }
@@ -103,6 +104,34 @@ final class W20SquirrelC1Control: W20C1Control {
                 store: W12EventBridge.shared.store, explicitConfirm: explicitConfirm)
         }
         W12Privacy.disableC1(store: W12EventBridge.shared.store)
+        return true
+    }
+}
+
+// MARK: - 留存开关同源（W12Privacy 上屏文本留存 L3，⌥M「记录我的回复」开关）
+
+/// W29：⌥M 管理浮层「记录我的回复（用于记忆与推荐）」开关的数据源——与事件留存链路
+/// 共用 W12Privacy 持久开关（store meta `commit_text_retention`，跨进程持久，默认关）。
+/// 确认文案 = W12Privacy.retentionConsentText（留存什么/干嘛用/本地存储/随时可关/
+/// 清空连事件一起）；关闭后新事件 text_out 不再留存（密码框/安全输入恒不记录不变）。
+final class W20SquirrelRetentionControl: W20RetentionControl {
+    var isRetentionEnabled: Bool {
+        W12Privacy.isCommitTextRetentionEnabled(store: W12EventBridge.shared.store)
+    }
+    var consentTitle: String { W12Privacy.retentionConsentTitle }
+    var consentText: String { W12Privacy.retentionConsentText }
+    var statusText: String {
+        isRetentionEnabled
+            ? "留存：开（新上屏回复入本地记忆，供回忆与推荐）"
+            : "留存：关（默认，回复不落库、配对无 my_reply）"
+    }
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
+        if on {
+            return W12Privacy.enableCommitTextRetention(
+                store: W12EventBridge.shared.store, explicitConfirm: explicitConfirm)
+        }
+        W12Privacy.disableCommitTextRetention(store: W12EventBridge.shared.store)
         return true
     }
 }

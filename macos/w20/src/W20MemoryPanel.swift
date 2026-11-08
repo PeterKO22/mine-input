@@ -19,6 +19,8 @@ public final class W20MemoryPanel: NSObject {
     private let engine: W20ProposalEngine
     /// W27：C1 屏幕/语音采集开关（⌥M 管理浮层 C1 开关与状态显示；nil = 无 C1 面，隐藏）。
     private let c1Control: W20C1Control?
+    /// W29：「记录我的回复（用于记忆与推荐）」开关（上屏文本留存 L3；nil = 无留存面，隐藏）。
+    private let retentionControl: W20RetentionControl?
 
     private var panel: NSPanel?
     private var filtered: [W20MemoryEntry] = []
@@ -34,6 +36,10 @@ public final class W20MemoryPanel: NSObject {
     private let c1StatusLabel = NSTextField(labelWithString: "")
     private let c1Label = NSTextField(labelWithString: "C1 屏幕/语音")
     private let c1Switch = NSSwitch()
+    // W29：记录我的回复（上屏文本留存 L3）开关 + 状态显示
+    private let retainStatusLabel = NSTextField(labelWithString: "")
+    private let retainLabel = NSTextField(labelWithString: "记录我的回复（用于记忆与推荐）")
+    private let retainSwitch = NSSwitch()
 
     // 记忆时间线
     private let searchField = NSSearchField()
@@ -52,11 +58,13 @@ public final class W20MemoryPanel: NSObject {
     private let tabControl = NSSegmentedControl()
 
     public init(store: W20MemoryStore, breaker: W20BreakerControl?,
-                engine: W20ProposalEngine, c1Control: W20C1Control? = nil) {
+                engine: W20ProposalEngine, c1Control: W20C1Control? = nil,
+                retentionControl: W20RetentionControl? = nil) {
         self.store = store
         self.breaker = breaker
         self.engine = engine
         self.c1Control = c1Control
+        self.retentionControl = retentionControl
         super.init()
     }
 
@@ -123,6 +131,17 @@ public final class W20MemoryPanel: NSObject {
         c1StatusLabel.isHidden = !hasC1
         c1Label.isHidden = !hasC1
         c1Switch.isHidden = !hasC1
+        // W29：「记录我的回复（用于记忆与推荐）」开关（首开弹显式确认文案，确认后才开）
+        retainStatusLabel.font = W20Font.mono(11)
+        retainStatusLabel.textColor = W20Color.gold
+        retainLabel.font = W20Font.body()
+        retainLabel.textColor = W20Color.dimText
+        retainSwitch.target = self
+        retainSwitch.action = #selector(onRetainToggled)
+        let hasRetain = retentionControl != nil
+        retainStatusLabel.isHidden = !hasRetain
+        retainLabel.isHidden = !hasRetain
+        retainSwitch.isHidden = !hasRetain
 
         let topRow = NSStackView(views: [
             statusDot, statusLabel, countsLabel, NSView(),
@@ -130,7 +149,13 @@ public final class W20MemoryPanel: NSObject {
         ])
         topRow.orientation = .horizontal
         topRow.spacing = 10
-        topRow.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        topRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
+        let retainRow = NSStackView(views: [
+            retainStatusLabel, retainLabel, retainSwitch, NSView(),
+        ])
+        retainRow.orientation = .horizontal
+        retainRow.spacing = 10
+        retainRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
 
         // ---- 分段：记忆时间线 / 提案卡 ----
         tabControl.segmentCount = 2
@@ -161,7 +186,7 @@ public final class W20MemoryPanel: NSObject {
             topBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             topBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             topBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            topBar.heightAnchor.constraint(equalToConstant: 44),
+            topBar.heightAnchor.constraint(equalToConstant: 80),
             tabControl.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
             tabControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             memoryPage.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 12),
@@ -174,14 +199,17 @@ public final class W20MemoryPanel: NSObject {
             proposalPage.bottomAnchor.constraint(equalTo: memoryPage.bottomAnchor),
         ])
 
-        // topBar 内部
-        topBar.addSubview(topRow)
-        topRow.translatesAutoresizingMaskIntoConstraints = false
+        // topBar 内部：两行（状态行 + W29 留存开关行）
+        let topStack = NSStackView(views: [topRow, retainRow])
+        topStack.orientation = .vertical
+        topStack.spacing = 0
+        topBar.addSubview(topStack)
+        topStack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            topRow.topAnchor.constraint(equalTo: topBar.topAnchor),
-            topRow.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
-            topRow.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
-            topRow.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
+            topStack.topAnchor.constraint(equalTo: topBar.topAnchor),
+            topStack.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
+            topStack.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
+            topStack.bottomAnchor.constraint(equalTo: topBar.bottomAnchor),
             statusDot.widthAnchor.constraint(equalToConstant: 10),
             statusDot.heightAnchor.constraint(equalToConstant: 10),
         ])
@@ -340,6 +368,11 @@ public final class W20MemoryPanel: NSObject {
         if let c1 = c1Control {
             c1Switch.state = c1.isC1Enabled ? .on : .off
             c1StatusLabel.stringValue = c1.statusText
+        }
+        // W29：留存开关与状态显示
+        if let r = retentionControl {
+            retainSwitch.state = r.isRetentionEnabled ? .on : .off
+            retainStatusLabel.stringValue = r.statusText
         }
     }
 
@@ -525,6 +558,29 @@ public final class W20MemoryPanel: NSObject {
             }
         } else {
             c1.setEnabled(false, explicitConfirm: true)
+        }
+        refreshStatus()
+    }
+
+    /// W29：「记录我的回复（用于记忆与推荐）」开关（上屏文本留存 L3）。开启走
+    /// **首开显式确认弹窗**（W12Privacy 确认文案：留存什么/干嘛用/本地存储/随时可关/
+    /// 清空连事件一起），确认后才 `setEnabled(true, explicitConfirm: true)`；取消则
+    /// 开关拨回（绝不静默留存）。关闭后新事件不再留存（密码框/安全输入恒不记录不变）。
+    @objc private func onRetainToggled() {
+        guard let r = retentionControl else { return }
+        if retainSwitch.state == .on {
+            let alert = NSAlert()
+            alert.messageText = r.consentTitle
+            alert.informativeText = r.consentText
+            alert.addButton(withTitle: "开启")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                r.setEnabled(true, explicitConfirm: true)
+            } else {
+                retainSwitch.state = .off  // 未确认 = 不留存
+            }
+        } else {
+            r.setEnabled(false, explicitConfirm: true)
         }
         refreshStatus()
     }

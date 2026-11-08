@@ -2,7 +2,7 @@
 
 > 规则：Mac（Tier A）为设计基准，Android（Tier B）逐项对齐；深水区只列 TODO 卡不展开。
 > 证据列引用 e2e/实测口径；随每轮同步任务更新。
-> 最后更新：W27（2026-11-07）
+> 最后更新：W29（2026-11-08）
 
 | # | 功能 | macOS 现状（基准） | Android 现状 | 差距 / 动作 | 状态 |
 |---|------|---------------------|--------------|-------------|------|
@@ -15,6 +15,7 @@
 | 7 | 产品名 | W18：「提炼输入法」/ "Mine Input"（TIS 输入源 + 菜单栏本地化） | W18：app_name/ime_name 同名（values / values-en），aapt badging ALL PASS | 无 | ✅ 平 |
 | 8 | 密码框隐私（C1，W24 新增口径） | 需求文档 v1.0：「密码框/支付场景（Secure Input）自动暂停、不可关闭」；ContextCore `secureInput` → `refused(.secureInputPaused)` | W24：textPassword / textVisiblePassword / webPassword / numberPassword 检测 → 自动 EN + 采集闸关死（SyncManager.collectionPaused，candidate_pick/voice_session 一律拒收）+ 不调 AI/云端 + 离开恢复原模式（密码框强制 EN 不可切） | 支付场景 / 敏感应用黑名单 → TODO-D | ✅ 平（扩展了自动 EN） |
 | 9 | 按键/语音→读屏理解推荐（C1 屏幕上下文，W27 新增口径） | W27：`W12C1Collector.onInputEvent()` 统一入口（按键 + PTT 右⌘/⌃⌥M）→防抖 1–2s 同会话合并→快照→Vision OCR→`ScreenTextContext` 环（3×400/1200 截断拼接）→`SuggestContext.screen_text` 进智能候选/⌥Esc 提词请求链 + `situation.screen_text` 进记忆 JSONL；⌥M 浮层 C1 开关（首开弹确认文案）；密码框/熔断/一键清空联动 | 无 | Android 读屏采集 + 屏幕上下文推荐链（同截断拼接策略 + 同隐私门）→ TODO-F | ❌ TODO-F |
+| 10 | 回复留存（L3）与「情境→回复」记忆（W29 新增口径） | W29：上屏文本留存持久开关（meta `commit_text_retention`，跨进程，默认关）——⌥M「记录我的回复（用于记忆与推荐）」开关（首开弹显式确认：留存什么/干嘛用/本地存储/随时可关/清空连事件一起）+ `w12ctl privacy retain on --confirm`；开后 commit 事件留存 text_out → `memoryctl pair` 产出 JSONL 记忆（situation+my_reply，可查/可改/可删）；pair 输出「段内无留存回复 / 真取消」分开计数 + 「回复留存未开，开后新会话才会配对」提示；密码框/安全输入恒拒收、一键清空事件层+记忆层同清 | 无 | 回复留存开关 + 「情境→回复」配对落库（同隐私门：首开确认/默认关/密码框恒拒/清空联动）→ TODO-G | ❌ TODO-G |
 
 ## TODO 卡（深水区，另行立项）
 
@@ -24,3 +25,4 @@
 - **TODO-D 敏感应用黑名单 + 支付场景**：Mac 同款「自动暂停不可关」扩展到应用维度。
 - **TODO-E 候选翻页**：>6 候选滑动/Tab 轮换（对齐 Mac rotate_candidate_with_tab）。
 - **TODO-F C1 读屏上下文 Android 版**：输入触发读屏（MediaProjection 快照→OCR）→ 屏幕上下文进 SuggestContext/situation（与 Mac W27 同截断拼接策略：环 3×400、总量 1200）→ 推荐链带 screen_text；C1 显式同意门（首开弹用途/范围/随时可关文案）+ 密码框（textPassword 等）零采集 + 熔断/一键清空联动 + 屏幕文本绝不出本地/自建 Hub。
+- **TODO-G 回复留存（L3）与「情境→回复」记忆 Android 版**：设置页「记录我的回复（用于记忆与推荐）」开关（首开弹显式确认：留存什么/干嘛用/本地存储/随时可关/清空连事件一起；默认关）→ 开后上屏回复（text_out 等价物）留存进本地事件库 → 「情境→回复」配对落 JSONL 记忆（可查/可改/可删/可导出）；密码框（textPassword 等）恒拒收、一键清空事件层+记忆层同清、不进同步导出（与 Mac W29 同隐私门）。

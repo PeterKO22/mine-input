@@ -34,13 +34,13 @@
 
 | 数据类 | 本机存储 | 是否离机 | 去向 | 谁能看到 | 门控 |
 |---|---|---|---|---|---|
-| 按键/候选事件（InteractionEvent） | SQLite（InteractionStore，30 天滚动） | 同意后可选 | 用户 Hub `/v1/ingest` | Hub 管理员（明文落库） | C0 同意 + 熔断 |
+| 按键/候选事件（InteractionEvent） | SQLite（InteractionStore，30 天滚动） | 同意后可选 | 用户 Hub `/v1/ingest` | Hub 管理员（明文落库） | C0 同意 + 熔断；**回复文本（text_out）仅在上屏留存开关（L3）开启时留存**（⌥M「记录我的回复（用于记忆与推荐）」/ `w12ctl privacy retain on --confirm`，首开弹显式确认，**默认关**——关 = 回复永不落库） |
 | L1 userdb / L2 计数器 / L3 热词 / AI 配置 | SQLite + RIME userdb | 同意后可选 | 用户 Hub `/v1/sync/push` | 同上 | 配对 + 熔断 |
 | OCR/ASR **摘要**（C1/C2，事件里只记长度/摘要，不落原文原图） | SQLite（仅摘要列） | C2 同意才随事件携带 | 用户 Hub | 同上 | C1/C2 逐项显式同意，默认关 |
 | 语音音频（PTT） | **不落盘**（16k mono 内存环形缓冲） | 否 | — | — | 用户按住 PTT 键即同意；系统 TCC |
 | 屏幕截图（C1） | **不落盘**（Vision OCR 后即弃原图） | 仅摘要可选 | 用户 Hub | 同上 | C1 开关默认关；密码框（secure input）自动停 |
 | **屏幕 OCR 文本**（W27，近期 OCR 摘要，理解与推荐用；截断拼接：环留 3×400 字符、总量 1200 字符封顶） | 仅内存环（`ScreenTextContext`，C1 关闭/一键清空即清）+ 本地 JSONL `situation.screen_text` | **仅**随 `suggest` 请求（`screen_text` 字段）去用户 Hub；**绝不**进同步/ingest 导出或任何遥测 | 用户 Hub `/v1/suggest`（仅用户配置的 base_url） | Hub 管理员 | C1 显式同意门（首次开启弹确认文案：用途/范围/随时可关）；密码框零采集；熔断立即停 |
-| JSONL 记忆库 | `~/Library/Application Support/mine-input/memory/` | 同步面可选（**`screen_text` 不进同步/ingest 导出**） | 用户 Hub | 同上 | 同意分级 + 熔断 + 可编辑/删除/清空 |
+| JSONL 记忆库 | `~/Library/Application Support/mine-input/memory/` | 同步面可选（**`screen_text` 不进同步/ingest 导出**） | 用户 Hub | 同上 | 同意分级 + 熔断 + 可编辑/删除/清空；`my_reply` 配对仅在上屏留存开关（L3）开启期间产生（W29：⌥M 可开，**默认关**；一键清空事件层+记忆层同清） |
 | suggest 请求（before_cursor、`screen_text` 等） | 不存（审计只记字段长度） | 按次 | 用户 Hub `/v1/suggest` | 同上 | AI 总开关默认关 |
 | TLS 证书/私钥、hub-secret | `hub/tls/certs/`、`hub-data/`（0600，**不入库**） | 否 | — | 主机管理员 | .gitignore 挡 |
 

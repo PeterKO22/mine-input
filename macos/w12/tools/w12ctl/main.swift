@@ -28,6 +28,10 @@ struct Opts {
     var username = ""
     var password = ""
     var commitRetention = false
+    var confirm = false
+    var textIn = ""
+    var textOut = ""
+    var ts: Int64? = nil
 
     init(_ args: [String]) {
         var i = 0
@@ -51,6 +55,10 @@ struct Opts {
             case "--username": username = next()
             case "--password": password = next()
             case "--commit-retention": commitRetention = true
+            case "--confirm": confirm = true
+            case "--text-in": textIn = next()
+            case "--text-out": textOut = next()
+            case "--ts": ts = Int64(next())
             default: break
             }
             i += 1
@@ -106,6 +114,20 @@ func cmdPrivacy(_ args: [String]) {
             W12Privacy.disableC1(store: bridge.store)
             print("c1 explicit disable: meta c1_enabled=0")
         }
+    case "retain":
+        // W29 上屏文本留存（L3）持久开关：on 需 --confirm 防误触（显式确认语义同 UI 弹窗）。
+        let action = args.count > 1 ? args[1] : "status"
+        if action == "on" {
+            guard opts.confirm else {
+                fputs("retain on 需 --confirm（防误触；等价 ⌥M 首开显式确认）\n", stderr)
+                exit(2)
+            }
+            let ok = W12Privacy.enableCommitTextRetention(store: bridge.store, explicitConfirm: true)
+            print("retain explicit enable: \(ok)（meta commit_text_retention=1，跨进程生效；密码框/安全输入恒不记录）")
+        } else if action == "off" {
+            W12Privacy.disableCommitTextRetention(store: bridge.store)
+            print("retain explicit disable: meta commit_text_retention=0（新事件 text_out 不再留存）")
+        }
     default:
         break
     }
@@ -118,13 +140,18 @@ func cmdPrivacy(_ args: [String]) {
     print("  安全输入（密码框）: 自动停不可关（IsSecureEventInputEnabled）")
     print("  黑名单: \(C0Collector.defaultBlacklist.count) 个敏感应用，命中跳过")
     print("  熔断: breaker=\(bridge.breaker.isTripped ? "TRIPPED" : "off")（trip 后立即停，日志保留不新增）")
-    print("  上屏文本留存(L3): \(settings.commitTextRetention ? "on" : "off（默认）")")
+    let retainOn = W12Privacy.isCommitTextRetentionEnabled(store: bridge.store)
+    print("  上屏文本留存(L3): \(retainOn ? "on" : "off（默认）")（持久开关 meta commit_text_retention=\(retainOn ? 1 : 0)，跨进程生效；w12ctl privacy retain on --confirm / ⌥M「记录我的回复」可开）")
     print("  状态条指示色约定: 灰#8E8E8E=采集关 / 青绿#388A83=仅C0 / 金#D4A857=C1采集激活 / 红#C0453E=熔断或安全输入暂停")
 }
 
 func cmdC1(_ args: [String]) {
     let opts = Opts(args)
     let bridge = makeBridge(opts)
+    if opts.commitRetention {
+        // W29：--commit-retention = 探针直通（强制留存；生产走持久开关）
+        bridge.commitRetentionOverride = true
+    }
     let collector = W12C1Collector(
         bridge: bridge, settings: {
             var s = W12Settings.load()
@@ -252,6 +279,23 @@ func cmdBridge(_ args: [String]) {
     let opts = Opts(args)
     let bridge = makeBridge(opts)
     let appId = opts.appId ?? "com.apple.TextEdit"
+
+    // W29 探针注入：`bridge commit|voice --text-in S --text-out S [--ts MS]`——
+    // 与 Squirrel 上报同一 API/同一落库路径（ts 注入 = 伪时钟，零 sleep 确定性）。
+    if let sub = args.first, sub == "commit" || sub == "voice" {
+        let r = sub == "commit"
+            ? bridge.reportKeySession(
+                textIn: opts.textIn, textOut: opts.textOut, appId: appId,
+                secureInput: opts.secureInput, ts: opts.ts)
+            : bridge.reportVoiceSession(
+                textIn: opts.textIn, textOut: opts.textOut, appId: appId,
+                secureInput: opts.secureInput, ts: opts.ts)
+        print("\(sub == "commit" ? "key_session" : "voice_session"): \(desc(mapInsert(r)))")
+        print("  retention: \(bridge.isCommitTextRetentionEnabled ? "on" : "off（text_out 留存关）")  secure_input: \(opts.secureInput)")
+        if case .refused = r { exit(1) }
+        return
+    }
+
     print("== W7×W9 接线：W7 事件 → W9 InteractionStore（同一 API，Squirrel 调用点相同）==")
     let r1 = bridge.reportKeySession(
         textIn: "ni hao", textOut: "你好", cadence: 3.2, appId: appId)
@@ -564,9 +608,11 @@ guard let cmd = args.first else {
     print("""
     usage: w12ctl <privacy|c1|bridge|prompter|breaker|hub-token|w27-e2e> ...
       privacy status | privacy c1 on|off
+      privacy retain on --confirm | privacy retain off   # W29 上屏文本留存(L3) 持久开关（on 需 --confirm 防误触）
       c1 status | c1 gen-image <png> | c1 ocr --image <png> | c1 capture --source screen
       c1 asr --wav <wav> | c1 trigger --keys N [--image <png>]
       bridge demo
+      bridge commit|voice --text-in S --text-out S [--ts MS] [--secure-input]   # W29 注入 commit 事件（ts=伪时钟）
       prompter --backend hub|null [--token T] [--text S] [--adopt N] [--from-voice]
       breaker trip|reset|status
       hub-token --username u --password p [--url http://localhost:8088]
