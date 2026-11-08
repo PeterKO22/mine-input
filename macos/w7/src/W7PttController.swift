@@ -3,6 +3,10 @@
  *
  * 任务 (a) PTT 语音上屏：
  *   - 右⌘ 按住说话（单修饰键，flagsChanged 级监听）；松开 → 处理 → commit 上屏；
+ *   - W28 锁定态（免手持长语音）：按住右⌘ ≥ W7PttLockMachine.lockThresholdSeconds（10.0s）
+ *     → 锁定（面板 🔒 已锁定·可以松开按键了），松手不停；锁定中再按右⌘ 本次 <10s 松开
+ *     → 停止上屏，又按住 ≥10s → 维持锁定；Esc 任意态取消。时长判定走伪时钟注入
+ *     （W7PttLockMachine.clock，单测零 sleep，见 macos/w7/tests/test_ptt_lock.swift）；
  *   - 兜底组合键开关：⌃⌥M（latch 模式：按一下开始、再按一下结束上屏）；
  *   - 录音中 Esc 取消（丢弃音频）；录音中出现其它修饰键 = 组合键用途，取消录音放行；
  *   - AVAudioEngine 采集 → 16k mono 环形缓冲（纯内存，音频不落盘）→
@@ -305,7 +309,12 @@ final class W7PttController {
     daemonPath: W7Config.path("W7VoiceDaemon") ?? "",
     hotwords: W7Config.path("W7Hotwords")
   )
-  private(set) var isCapturing = false
+  /// W28: PTT 锁定态状态机（录音/锁定相位 + 时长判定，时钟可注入）。
+  private let machine = W7PttLockMachine()
+  /// 锁定阈值检查定时器（按住跨过 lockThresholdSeconds → machine.tick() → 锁定提示）。
+  private var lockTickItem: DispatchWorkItem?
+  /// 录音或锁定中（音频采集进行时）——W12SquirrelGlue.fromVoice 等外部只读。
+  var isCapturing: Bool { machine.phase != .idle }
 
   private init() {
     daemon.warmup()  // 首次触碰即预热模型，松开→上屏只等管线推理
@@ -334,60 +343,97 @@ final class W7PttController {
   private func interceptFlags(_ event: NSEvent, last: NSEvent.ModifierFlags,
                               now: NSEvent.ModifierFlags) -> Bool {
     let changes = last.symmetricDifference(now)
-    // 录音中出现其它修饰键 → 组合键用途（如 ⌘C），取消录音并放行该事件
+    // 录音/锁定中出现其它修饰键 → 组合键用途（如 ⌘C），取消并放行该事件（W28：锁定态对称）
     if isCapturing, changes.contains(.shift) || changes.contains(.control) || changes.contains(.option) {
-      cancelCapture(reason: "已取消录音（检测到组合键）")
+      handle(machine.comboCancel())
       return false
     }
     let soleCommandNow = now.subtracting([.command, .capsLock]).isEmpty
     let soleCommandLast = last.subtracting([.command, .capsLock]).isEmpty
-    // 右⌘ 按下（单修饰键）→ 开始采集
+    // 右⌘ 按下（单修饰键）→ 开始采集；W28：锁定中再按 = 停止手势（<10s 松开→停止上屏，
+    // 又按住 ≥10s→维持锁定）——两种情形该按键都归 PTT，一律消费
     if event.keyCode == W7KeyCode.rightCommand, !last.contains(.command), now.contains(.command),
        soleCommandNow, soleCommandLast {
-      startCapture()
+      handle(machine.pressBegan())
       return true
     }
-    // ⌘ 释放（含右⌘）→ 结束采集并上屏（仅当由本控制器开启的录音）
+    // ⌘ 释放 → 结束采集并上屏（仅当由本控制器开启的录音）。
+    // W28：按住 <10s 松开→停止（①）；≥10s 已锁定→松手不停（②）；锁定中停止手势 <10s
+    // 松开→停止（③）。松手不停的情形同样消费，避免 ⌘ 释放泄漏给客户端。
     if isCapturing, last.contains(.command), !now.contains(.command) {
-      stopAndProcess()
+      handle(machine.pressEnded())
       return true
     }
     return false
   }
 
   private func interceptKey(_ event: NSEvent, now: NSEvent.ModifierFlags) -> Bool {
-    // 录音中 Esc → 取消（丢弃音频，不 commit）
+    // Esc → 取消（丢弃音频，不 commit）。W28：任意态取消（录音 + 锁定）（④）
     if isCapturing, event.keyCode == W7KeyCode.escape {
-      cancelCapture(reason: "已取消录音（Esc）")
+      handle(machine.escape())
       return true
     }
-    // 兜底组合键开关：⌃⌥M（latch：按一下开始，再按一下结束上屏）
+    // 兜底组合键开关：⌃⌥M（latch：按一下开始、再按一下结束上屏；W28：锁定中按 → 停止上屏）
     if event.keyCode == W7KeyCode.mKey,
        now.subtracting(.capsLock) == [NSEvent.ModifierFlags.control, .option] {
       if isCapturing {
-        stopAndProcess()
+        handle(machine.stopRequest())
       } else {
-        startCapture()
+        handle(machine.beginLatch())
       }
       return true
     }
     return false
   }
 
-  private func startCapture() {
-    guard !isCapturing else { return }
+  /// W28: 状态机动作 → 副作用。machine 已完成相位迁移，这里只做采集/面板/转写。
+  private func handle(_ action: W7PttAction) {
+    switch action {
+    case .none:
+      break
+    case .beginRecording:
+      beginCapture()
+    case .lock, .relock:
+      // 锁定态面板（🔒 已锁定 · 可以松开按键了），与聆听态 🎙 明显区分；
+      // 仍处 PTT 语音窗内（不收口 W12 触发窗，无 notePttEnd）。
+      controller?.w7ShowLockedHint()
+    case .stopAndProcess:
+      stopAndProcess()
+    case .cancel(let reason):
+      cancelCapture(reason: reason == .escape ? "已取消录音（Esc）" : "已取消录音（检测到组合键）")
+    }
+    scheduleLockTickIfNeeded()
+  }
+
+  private func beginCapture() {
     do {
       try capture.start()
-      isCapturing = true
       controller?.w7ShowRecordingHint()
     } catch {
+      machine.reset()  // 采集起不来不进录音态
       controller?.w7ShowVoiceStatus("无法启动麦克风采集（检查麦克风权限）：\(error.localizedDescription)")
     }
   }
 
+  /// 锁定阈值检查定时器：驱动 machine.tick()（按住跨过 lockThresholdSeconds → 锁定提示）。
+  /// 单测不经过此处——W7PttLockMachine 伪时钟直调 tick（零 sleep）。
+  private func scheduleLockTickIfNeeded() {
+    guard let remain = machine.secondsToThreshold() else {
+      lockTickItem?.cancel()
+      lockTickItem = nil
+      return
+    }
+    lockTickItem?.cancel()
+    let item = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.handle(self.machine.tick())  // 提前醒来时 handle 会按剩余时间重排
+    }
+    lockTickItem = item
+    DispatchQueue.main.asyncAfter(deadline: .now() + max(remain, 0.05), execute: item)
+  }
+
   private func stopAndProcess() {
-    guard isCapturing else { return }
-    isCapturing = false
+    lockTickItem?.cancel()
     let pcm = capture.stop()  // 环形缓冲导出（内存），随后即弃
     processPCM(pcm, source: "ptt") { [weak self] in
       self?.controller?.w7ShowVoiceStatus("识别中…")
@@ -445,8 +491,7 @@ final class W7PttController {
   }
 
   private func cancelCapture(reason: String) {
-    guard isCapturing else { return }
-    isCapturing = false
+    lockTickItem?.cancel()
     _ = capture.stop()  // 丢弃，不送识别
     controller?.w7ShowVoiceStatus(reason)
   }

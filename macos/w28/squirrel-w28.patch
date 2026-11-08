@@ -1,0 +1,68 @@
+# W28 ptt-lock 集成补丁（可复现记录；前置 dev+w7+w12+w20+w26+w27 补丁链）
+#
+# 修改 Squirrel 既有 2 文件：
+#   - sources/SquirrelInputController.swift：新增 w7ShowLockedHint()——W28 锁定态
+#     面板文案（🔒 已锁定 · 可以松开按键了），与聆听态 🎙 明显区分；仍处 PTT
+#     语音窗内（无 notePttEnd，不收口 W12 触发窗）。聆听态文案不变。
+#   - Squirrel.xcodeproj/project.pbxproj：编入 ../w7/src/W7PttLockMachine.swift
+#     （W28 PTT 锁定态状态机，FA70…A6/B6 id）——macos/w7 为唯一事实源。
+#
+# 应用方式：在已套用 dev+w7+w12+w20+w26+w27 补丁的 macos/squirrel 上
+#   bash macos/w28/scripts/apply-w28.sh
+
+--- a/sources/SquirrelInputController.swift
++++ b/sources/SquirrelInputController.swift
+@@ -715,6 +715,18 @@
+     // W12: PTT 语音窗开始（C1 仅输入时触发窗：PTT 期间可采集）
+     W12SquirrelHooks.shared.notePttStart()
+     showPanel(preedit: "🎙 正在聆听…（松开上屏 · Esc 取消）",
++              selRange: NSRange(location: 0, length: 0), caretPos: 0,
++              candidates: [], comments: [], labels: [],
++              highlighted: -1, page: 0, lastPage: true)
++  }
++
++  /// W28: 锁定态提示（面板 preedit 行，不写客户端 marked text）。与聆听态
++  /// 「🎙 正在聆听…」明显区分：🔒 +「已锁定」+「可以松开按键了」。
++  /// design-language.md：听写中 = cyan（🎙 聆听态沿用）；锁定态 = gold 主强调语义
++  /// （🔒 已锁定 = 选中/主强调态），文案含「可以松开按键了」。
++  /// 仍处 PTT 语音窗内（继续采集免手持），不收口 W12 触发窗（无 notePttEnd）。
++  func w7ShowLockedHint() {
++    showPanel(preedit: "🔒 已锁定录音中…（可以松开按键了 · 轻点右⌘ 停止上屏 · Esc 取消）",
+               selRange: NSRange(location: 0, length: 0), caretPos: 0,
+               candidates: [], comments: [], labels: [],
+               highlighted: -1, page: 0, lastPage: true)
+
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -100,6 +100,7 @@
+ 		FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A3 /* W7RescoreHook.cc */; };
+ 		FA70000000000000000000B4 /* timeout_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A4 /* timeout_assist.cc */; };
+ 		FA70000000000000000000B5 /* null_ai_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A5 /* null_ai_assist.cc */; };
++		FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A6 /* W7PttLockMachine.swift */; };
+ 		FA7200000000000000000001 /* W12Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* W12Digest.swift */; };
+ 		FA7200000000000000000002 /* W12Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* W12Config.swift */; };
+ 		FA7200000000000000000003 /* W12OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000003 /* W12OCR.swift */; };
+@@ -342,6 +343,7 @@
+ 		FA70000000000000000000A3 /* W7RescoreHook.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = W7RescoreHook.cc; path = ../w7/W7RescoreHook.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A4 /* timeout_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = timeout_assist.cc; path = ../../ai/spi/timeout_assist.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A5 /* null_ai_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_ai_assist.cc; path = ../../ai/backends/null/null_ai_assist.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A6 /* W7PttLockMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7PttLockMachine.swift; path = ../w7/src/W7PttLockMachine.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000001 /* W12Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Digest.swift; path = ../w12/src/W12Digest.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000002 /* W12Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Config.swift; path = ../w12/src/W12Config.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000003 /* W12OCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12OCR.swift; path = ../w12/src/W12OCR.swift; sourceTree = "<group>"; };
+@@ -400,6 +402,7 @@
+ 				B3A001012F260100009D156B /* ReservedProperty.swift */,
+ 				B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */,
+ 				FA70000000000000000000A1 /* W7PttController.swift */,
++				FA70000000000000000000A6 /* W7PttLockMachine.swift */,
+ 				FA70000000000000000000A2 /* W7RescoreBridge.mm */,
+ 				FA70000000000000000000A3 /* W7RescoreHook.cc */,
+ 				FA70000000000000000000A4 /* timeout_assist.cc */,
+@@ -696,6 +699,7 @@
+ 				B35D2FE82BF00839009D156B /* BridgingFunctions.swift in Sources */,
+ 				B3A001022F260100009D156B /* ReservedProperty.swift in Sources */,
+ 				FA70000000000000000000B1 /* W7PttController.swift in Sources */,
++				FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */,
+ 				FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */,
+ 				FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */,
+ 				FA70000000000000000000B4 /* timeout_assist.cc in Sources */,
