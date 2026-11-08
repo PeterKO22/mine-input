@@ -38,6 +38,8 @@ jobs:
           n=0
           while IFS= read -r f; do python3 -m py_compile "$f"; n=$((n+1)); done < <(git ls-files '*.py')
           echo "checked $n .py files"
+      - name: 数据文件门（用户数据零入库）
+        run: bash build/check-no-data-files.sh
 
   cpp:
     name: cpp (cmake + ctest 4)
