@@ -100,10 +100,20 @@ SHA256 sums and file sizes are in `voice/W2-REPORT.md` §3; on the Python side i
 
 ### 4b. Model server (native 7B on the host, recommended)
 
+The model server is **off by default and never auto-starts** (W30 hard guarantee — nothing
+loads the model until you explicitly turn it on). Turn it on from the ⌥M management panel
+(「本地模型（7B）」 toggle: confirm the resource hint → start + health check) or from the CLI:
+
 ```bash
-./models/run-llama-native.sh load   # managed by launchd: auto-start / crash respawn / log rotation
-./models/run-llama-native.sh status # should show launchd loaded + /health 200 (port :8092)
+./models/manage-model-service.sh start   # explicit on: start + health check (/v1/models or /completion)
+./models/manage-model-service.sh status  # state=not-loaded|loading|ready + probe result
+./models/manage-model-service.sh stop    # explicit off: stop immediately (idempotent)
 ```
+
+`models/run-llama-native.sh` is the internal engine (do not call it directly). The old
+launchd auto-start (`load`/`unload`/`serve`, `com.mineinput.llama.plist`) was **removed**:
+login auto-start / crash respawn violated "the user must open it before it loads";
+`manage-model-service.sh stop/status` also purges any previously installed leftover agent.
 
 ### 4c. Hub (Docker; one machine serving 2–5 friends)
 
@@ -120,14 +130,26 @@ Friends get three things: the address `https://<host>:8443`, the CA certificate
 
 ## 5. AI Configuration (config/ai.yaml)
 
+`config/ai.yaml` (copied from `config/ai.example.yaml`) is the **single configuration
+entry** for the AI chain — the four keys are all you need to know:
+
 ```bash
 cp config/ai.example.yaml config/ai.yaml    # edit backend/model/endpoint/budget_ms as needed
 eval "$(config/ai-env.sh)"                  # maps to MODEL_NAME/MODEL_URL/SUGGEST_BUDGET_MS/...
 docker compose -f hub/docker-compose.yml -f config/ai-compose.override.yml up -d
 ```
 
+| key | meaning |
+|---|---|
+| `backend` | AI backend shape: `local_gguf` (local llama.cpp, offline-first) / `openai_compatible` / `hub` |
+| `model` | model name, honestly reported in each suggestion's `source` field (e.g. `qwen2.5-7b-instruct-q4_k_m`) |
+| `endpoint` | backend address (local llama-server base, e.g. `http://127.0.0.1:8092`) |
+| `budget_ms` | per-suggestion latency budget (default 800; over budget the round is dropped, typing never blocks) |
+
 - Per-key documentation is in [config/ai.example.yaml](config/ai.example.yaml)
   (backend=`local_gguf`|`openai_compatible`|`hub`);
+- The ⌥M management panel shows the config path with a one-click「打开配置」button
+  (opens `config/ai.yaml` in your default editor; copies it from the example on first use);
 - Prefer not to use a file: export the same-named environment variables directly (the env mapping
   table is at the end of ai.example.yaml); **environment variables win**;
 - `ai-compose.override.yml` exists only to pass `budget_ms` through into the container (the compose
@@ -141,7 +163,7 @@ docker compose -f hub/docker-compose.yml -f config/ai-compose.override.yml up -d
 bash build/uninstall-dev.sh         # macOS: removes Squirrel-dev.app + Rime-mine-dev (only its own)
 adb uninstall com.mineinput.ime     # Android
 docker compose down                 # Hub (data lives in the hub-data volume, nothing is lost)
-./models/run-llama-native.sh unload # model server
+./models/manage-model-service.sh stop  # model server (off = not loaded; idempotent)
 ```
 
 ## 7. Troubleshooting
@@ -151,7 +173,7 @@ docker compose down                 # Hub (data lives in the hub-data volume, no
 | librime build fails with "platform no longer supported by libc++" | Clean `core/librime/deps/*/build` and re-run (the script pins `MACOSX_DEPLOYMENT_TARGET=13.0`) |
 | After installing and switching IMEs, nothing types | A stale process is holding the inode: re-run `install-dev.sh` (it contains pkill + a liveness gate) and check the IMK endpoint log |
 | Android build missing AAR/.so | Re-run `android/fetch-deps.sh` / `android/fetch-rime-jni.sh` (idempotent, SHA256-verified) |
-| Hub suggest degrades to a stub | The model server isn't up: `models/run-llama-native.sh status`; or forbid the fallback with `SUGGEST_ALLOW_STUB_FALLBACK=0` |
+| Hub suggest degrades to a stub | The model server isn't up (it is **off by default** — turn it on via the ⌥M「本地模型（7B）」toggle or `models/manage-model-service.sh start`): `models/manage-model-service.sh status`; or forbid the fallback with `SUGGEST_ALLOW_STUB_FALLBACK=0` |
 | curl reports a certificate error | You didn't pass `--cacert hub/tls/certs/ca.crt` (a self-signed CA must be explicitly trusted) |
 | 7B OOMs inside the Docker VM | Run it natively on the host (§4b) or drop to the 0.5B tier (`MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m`) |
 | All tokens invalid after restoring a backup | The backup's `hub-secret` differs from the live one — restore with the backup's bundle or log in again |

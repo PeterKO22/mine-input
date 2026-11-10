@@ -1,0 +1,168 @@
+# W30 本地模型显式开关集成补丁（可复现记录；前置 dev+w7+w12+w20+w26+w27+w28 补丁链）
+#
+# 修改 Squirrel 既有 1 文件：
+#   - Squirrel.xcodeproj/project.pbxproj：编入 ../w20/src/W20ModelControl.swift
+#     （W30「本地模型（7B）」开关抽象 + W20ModelServiceControl 生产实现，FA75…0A/FA76…0A id）
+#     ——macos/w20/src 为唯一事实源。⌥M 浮层区块、w20ctl model 子命令均随 W20 共享源码编译。
+#
+# 应用方式：在已套用 dev+w7+w12+w20+w26+w27+w28 补丁的 macos/squirrel 上
+#   bash macos/w30/scripts/apply-w30.sh
+
+diff --git a/Squirrel.xcodeproj/project.pbxproj b/Squirrel.xcodeproj/project.pbxproj
+index edde586..7b76e69 100644
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -98,6 +95,37 @@
+ 		D26434552706A15100857391 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D26434542706A15100857391 /* QuartzCore.framework */; };
+ 		E93074B70A5C264700470842 /* InputMethodKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E93074B60A5C264700470842 /* InputMethodKit.framework */; };
+ 		F45E005F2B8CA81C00179B75 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F45E005E2B8CA81C00179B75 /* UserNotifications.framework */; };
++		FA70000000000000000000B1 /* W7PttController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A1 /* W7PttController.swift */; };
++		FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A2 /* W7RescoreBridge.mm */; };
++		FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A3 /* W7RescoreHook.cc */; };
++		FA70000000000000000000B4 /* timeout_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A4 /* timeout_assist.cc */; };
++		FA70000000000000000000B5 /* null_ai_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A5 /* null_ai_assist.cc */; };
++		FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A6 /* W7PttLockMachine.swift */; };
++		FA7200000000000000000001 /* W12Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* W12Digest.swift */; };
++		FA7200000000000000000002 /* W12Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* W12Config.swift */; };
++		FA7200000000000000000003 /* W12OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000003 /* W12OCR.swift */; };
++		FA7200000000000000000004 /* W12ScreenCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000004 /* W12ScreenCapture.swift */; };
++		FA7200000000000000000005 /* W12AsrClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000005 /* W12AsrClient.swift */; };
++		FA7200000000000000000006 /* W12EventBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000006 /* W12EventBridge.swift */; };
++		FA7200000000000000000007 /* W12C1Collector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000007 /* W12C1Collector.swift */; };
++		FA7200000000000000000008 /* W12PrompterModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000008 /* W12PrompterModel.swift */; };
++		FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000009 /* W12PrompterOverlay.swift */; };
++		FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000A /* W12SquirrelGlue.swift */; };
++		FA7600000000000000000001 /* W20MemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000001 /* W20MemoryStore.swift */; };
++		FA7600000000000000000002 /* W20Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000002 /* W20Design.swift */; };
++		FA7600000000000000000003 /* W20ProposalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000003 /* W20ProposalModel.swift */; };
++		FA7600000000000000000004 /* W20ProposalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000004 /* W20ProposalCard.swift */; };
++		FA7600000000000000000005 /* W20MemoryPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000005 /* W20MemoryPanel.swift */; };
++		FA7600000000000000000006 /* W20SquirrelGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000006 /* W20SquirrelGlue.swift */; };
++		FA7600000000000000000007 /* W20ProposalBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000008 /* W20ProposalBridge.mm */; };
++		FA7600000000000000000008 /* null_proposal_agent.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA7500000000000000000009 /* null_proposal_agent.cc */; };
++		FA760000000000000000000A /* W20ModelControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA750000000000000000000A /* W20ModelControl.swift */; };
++		FA720000000000000000000B /* InteractionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000B /* InteractionEvent.swift */; };
++		FA720000000000000000000C /* InteractionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000C /* InteractionStore.swift */; };
++		FA720000000000000000000D /* CircuitBreaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000D /* CircuitBreaker.swift */; };
++		FA720000000000000000000E /* C0Collector.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000E /* C0Collector.swift */; };
++		FA720000000000000000000F /* SuggestClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA710000000000000000000F /* SuggestClient.swift */; };
++		FA7800000000000000000001 /* ScreenTextContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7700000000000000000001 /* ScreenTextContext.swift */; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXCopyFilesBuildPhase section */
+@@ -317,6 +339,38 @@
+ 		D26434542706A15100857391 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+ 		E93074B60A5C264700470842 /* InputMethodKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = InputMethodKit.framework; path = /System/Library/Frameworks/InputMethodKit.framework; sourceTree = "<absolute>"; };
+ 		F45E005E2B8CA81C00179B75 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
++		FA70000000000000000000A1 /* W7PttController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7PttController.swift; path = ../w7/src/W7PttController.swift; sourceTree = "<group>"; };
++		FA70000000000000000000A2 /* W7RescoreBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = W7RescoreBridge.mm; path = ../w7/src/W7RescoreBridge.mm; sourceTree = "<group>"; };
++		FA70000000000000000000A3 /* W7RescoreHook.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = W7RescoreHook.cc; path = ../w7/W7RescoreHook.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A4 /* timeout_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = timeout_assist.cc; path = ../../ai/spi/timeout_assist.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A5 /* null_ai_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_ai_assist.cc; path = ../../ai/backends/null/null_ai_assist.cc; sourceTree = "<group>"; };
++		FA70000000000000000000A6 /* W7PttLockMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7PttLockMachine.swift; path = ../w7/src/W7PttLockMachine.swift; sourceTree = "<group>"; };
++		FA7100000000000000000001 /* W12Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Digest.swift; path = ../w12/src/W12Digest.swift; sourceTree = "<group>"; };
++		FA7100000000000000000002 /* W12Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Config.swift; path = ../w12/src/W12Config.swift; sourceTree = "<group>"; };
++		FA7100000000000000000003 /* W12OCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12OCR.swift; path = ../w12/src/W12OCR.swift; sourceTree = "<group>"; };
++		FA7100000000000000000004 /* W12ScreenCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12ScreenCapture.swift; path = ../w12/src/W12ScreenCapture.swift; sourceTree = "<group>"; };
++		FA7100000000000000000005 /* W12AsrClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12AsrClient.swift; path = ../w12/src/W12AsrClient.swift; sourceTree = "<group>"; };
++		FA7100000000000000000006 /* W12EventBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12EventBridge.swift; path = ../w12/src/W12EventBridge.swift; sourceTree = "<group>"; };
++		FA7100000000000000000007 /* W12C1Collector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12C1Collector.swift; path = ../w12/src/W12C1Collector.swift; sourceTree = "<group>"; };
++		FA7100000000000000000008 /* W12PrompterModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterModel.swift; path = ../w12/src/W12PrompterModel.swift; sourceTree = "<group>"; };
++		FA7100000000000000000009 /* W12PrompterOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12PrompterOverlay.swift; path = ../w12/src/W12PrompterOverlay.swift; sourceTree = "<group>"; };
++		FA710000000000000000000A /* W12SquirrelGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12SquirrelGlue.swift; path = ../w12/src/W12SquirrelGlue.swift; sourceTree = "<group>"; };
++		FA7500000000000000000001 /* W20MemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20MemoryStore.swift; path = ../w20/src/W20MemoryStore.swift; sourceTree = "<group>"; };
++		FA7500000000000000000002 /* W20Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20Design.swift; path = ../w20/src/W20Design.swift; sourceTree = "<group>"; };
++		FA7500000000000000000003 /* W20ProposalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20ProposalModel.swift; path = ../w20/src/W20ProposalModel.swift; sourceTree = "<group>"; };
++		FA7500000000000000000004 /* W20ProposalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20ProposalCard.swift; path = ../w20/src/W20ProposalCard.swift; sourceTree = "<group>"; };
++		FA7500000000000000000005 /* W20MemoryPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20MemoryPanel.swift; path = ../w20/src/W20MemoryPanel.swift; sourceTree = "<group>"; };
++		FA7500000000000000000006 /* W20SquirrelGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20SquirrelGlue.swift; path = ../w20/src/W20SquirrelGlue.swift; sourceTree = "<group>"; };
++		FA7500000000000000000007 /* W20ProposalBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = W20ProposalBridge.h; path = ../w20/bridge/W20ProposalBridge.h; sourceTree = "<group>"; };
++		FA7500000000000000000008 /* W20ProposalBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = W20ProposalBridge.mm; path = ../w20/bridge/W20ProposalBridge.mm; sourceTree = "<group>"; };
++		FA7500000000000000000009 /* null_proposal_agent.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_proposal_agent.cc; path = ../../ai/backends/null/null_proposal_agent.cc; sourceTree = "<group>"; };
++		FA750000000000000000000A /* W20ModelControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W20ModelControl.swift; path = ../w20/src/W20ModelControl.swift; sourceTree = "<group>"; };
++		FA710000000000000000000B /* InteractionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionEvent.swift; path = ../../context/Sources/ContextCore/InteractionEvent.swift; sourceTree = "<group>"; };
++		FA710000000000000000000C /* InteractionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InteractionStore.swift; path = ../../context/Sources/ContextCore/InteractionStore.swift; sourceTree = "<group>"; };
++		FA710000000000000000000D /* CircuitBreaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CircuitBreaker.swift; path = ../../context/Sources/ContextCore/CircuitBreaker.swift; sourceTree = "<group>"; };
++		FA710000000000000000000E /* C0Collector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = C0Collector.swift; path = ../../context/Sources/ContextCore/C0Collector.swift; sourceTree = "<group>"; };
++		FA710000000000000000000F /* SuggestClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SuggestClient.swift; path = ../../context/Sources/ContextCore/SuggestClient.swift; sourceTree = "<group>"; };
++		FA7700000000000000000001 /* ScreenTextContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScreenTextContext.swift; path = ../../context/Sources/ContextCore/ScreenTextContext.swift; sourceTree = "<group>"; };
+ /* End PBXFileReference section */
+ 
+ /* Begin PBXFrameworksBuildPhase section */
+@@ -349,6 +403,38 @@
+ 				B35D2FE72BF00839009D156B /* BridgingFunctions.swift */,
+ 				B3A001012F260100009D156B /* ReservedProperty.swift */,
+ 				B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */,
++				FA70000000000000000000A1 /* W7PttController.swift */,
++				FA70000000000000000000A6 /* W7PttLockMachine.swift */,
++				FA70000000000000000000A2 /* W7RescoreBridge.mm */,
++				FA70000000000000000000A3 /* W7RescoreHook.cc */,
++				FA70000000000000000000A4 /* timeout_assist.cc */,
++				FA70000000000000000000A5 /* null_ai_assist.cc */,
++				FA7100000000000000000001 /* W12Digest.swift */,
++				FA7100000000000000000002 /* W12Config.swift */,
++				FA7100000000000000000003 /* W12OCR.swift */,
++				FA7100000000000000000004 /* W12ScreenCapture.swift */,
++				FA7100000000000000000005 /* W12AsrClient.swift */,
++				FA7100000000000000000006 /* W12EventBridge.swift */,
++				FA7100000000000000000007 /* W12C1Collector.swift */,
++				FA7100000000000000000008 /* W12PrompterModel.swift */,
++				FA7100000000000000000009 /* W12PrompterOverlay.swift */,
++				FA710000000000000000000A /* W12SquirrelGlue.swift */,
++				FA7500000000000000000001 /* W20MemoryStore.swift */,
++				FA7500000000000000000002 /* W20Design.swift */,
++				FA7500000000000000000003 /* W20ProposalModel.swift */,
++				FA7500000000000000000004 /* W20ProposalCard.swift */,
++				FA7500000000000000000005 /* W20MemoryPanel.swift */,
++				FA7500000000000000000006 /* W20SquirrelGlue.swift */,
++				FA7500000000000000000007 /* W20ProposalBridge.h */,
++				FA7500000000000000000008 /* W20ProposalBridge.mm */,
++				FA7500000000000000000009 /* null_proposal_agent.cc */,
++				FA750000000000000000000A /* W20ModelControl.swift */,
++				FA710000000000000000000B /* InteractionEvent.swift */,
++				FA710000000000000000000C /* InteractionStore.swift */,
++				FA710000000000000000000D /* CircuitBreaker.swift */,
++				FA710000000000000000000E /* C0Collector.swift */,
++				FA710000000000000000000F /* SuggestClient.swift */,
++				FA7700000000000000000001 /* ScreenTextContext.swift */,
+ 			);
+ 			name = Sources;
+ 			sourceTree = "<group>";
+@@ -618,6 +701,37 @@
+ 				B39771272BED9B250093A49B /* SquirrelTheme.swift in Sources */,
+ 				B35D2FE82BF00839009D156B /* BridgingFunctions.swift in Sources */,
+ 				B3A001022F260100009D156B /* ReservedProperty.swift in Sources */,
++				FA70000000000000000000B1 /* W7PttController.swift in Sources */,
++				FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */,
++				FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */,
++				FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */,
++				FA70000000000000000000B4 /* timeout_assist.cc in Sources */,
++				FA70000000000000000000B5 /* null_ai_assist.cc in Sources */,
++				FA7200000000000000000001 /* W12Digest.swift in Sources */,
++				FA7200000000000000000002 /* W12Config.swift in Sources */,
++				FA7200000000000000000003 /* W12OCR.swift in Sources */,
++				FA7200000000000000000004 /* W12ScreenCapture.swift in Sources */,
++				FA7200000000000000000005 /* W12AsrClient.swift in Sources */,
++				FA7200000000000000000006 /* W12EventBridge.swift in Sources */,
++				FA7200000000000000000007 /* W12C1Collector.swift in Sources */,
++				FA7200000000000000000008 /* W12PrompterModel.swift in Sources */,
++				FA7200000000000000000009 /* W12PrompterOverlay.swift in Sources */,
++				FA720000000000000000000A /* W12SquirrelGlue.swift in Sources */,
++				FA7600000000000000000001 /* W20MemoryStore.swift in Sources */,
++				FA7600000000000000000002 /* W20Design.swift in Sources */,
++				FA7600000000000000000003 /* W20ProposalModel.swift in Sources */,
++				FA7600000000000000000004 /* W20ProposalCard.swift in Sources */,
++				FA7600000000000000000005 /* W20MemoryPanel.swift in Sources */,
++				FA760000000000000000000A /* W20ModelControl.swift in Sources */,
++				FA7600000000000000000006 /* W20SquirrelGlue.swift in Sources */,
++				FA7600000000000000000007 /* W20ProposalBridge.mm in Sources */,
++				FA7600000000000000000008 /* null_proposal_agent.cc in Sources */,
++				FA720000000000000000000B /* InteractionEvent.swift in Sources */,
++				FA720000000000000000000C /* InteractionStore.swift in Sources */,
++				FA720000000000000000000D /* CircuitBreaker.swift in Sources */,
++				FA720000000000000000000E /* C0Collector.swift in Sources */,
++				FA720000000000000000000F /* SuggestClient.swift in Sources */,
++				FA7800000000000000000001 /* ScreenTextContext.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};

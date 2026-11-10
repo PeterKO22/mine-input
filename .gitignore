@@ -28,3 +28,5 @@ build/logs/
 .demo/
 *.userdb
 memory/
+# W30 用户配置（ai.example.yaml 是唯一入库模板；ai.yaml 是用户自己的，不入库）
+config/ai.yaml

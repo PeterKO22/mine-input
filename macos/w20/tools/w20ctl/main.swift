@@ -28,6 +28,7 @@ struct Opts {
     var mode = ""
     var out = ""
     var db = ""
+    var confirm = false
 
     init(_ args: [String]) {
         var i = 0
@@ -46,6 +47,7 @@ struct Opts {
             case "--mode": mode = next()
             case "--out": out = next()
             case "--db": db = next()
+            case "--confirm": confirm = true
             default: break
             }
             i += 1
@@ -84,6 +86,25 @@ final class W29StubRetentionControl: W20RetentionControl {
     func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
         guard explicitConfirm || !on else { return false }  // 开启必须显式确认
         isRetentionEnabled = on
+        return true
+    }
+}
+
+/// W30 panel-dump 桩：「本地模型（7B）」开关数据源（界面形态可验，零副作用不拉起服务）。
+/// 生产实现 = W20ModelServiceControl（Process → models/manage-model-service.sh，同源）。
+final class W30StubModelControl: W20ModelControl {
+    var isServiceRunning = false
+    var statusText: String {
+        isServiceRunning ? "本地模型：就绪（探活 /v1/models 通过 · :8092）"
+                         : "本地模型：未加载（默认；探活：未运行）"
+    }
+    var consentTitle = "开启「本地模型（7B）」？"
+    var consentText = "资源提示：约 5 GB 内存；仅本机推理。默认关闭。"
+    var configPath = "/Users/aitetot/AITECreate/mine-input/config/ai.yaml"
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
+        guard explicitConfirm || !on else { return false }  // 开启必须显式确认
+        isServiceRunning = on
         return true
     }
 }
@@ -202,10 +223,46 @@ func runPanelDump(_ opts: Opts) {
     let store = makeStore(opts)
     let panel = W20MemoryPanel(store: store, breaker: nil,
                                engine: W20NullProposalEngine(),
-                               retentionControl: W29StubRetentionControl())
+                               retentionControl: W29StubRetentionControl(),
+                               modelControl: W30StubModelControl())
     panel.show()
     print(panel.debugDump())
     panel.close()
+}
+
+/// W30：本地模型（7B）显式开关——与 ⌥M 面板开关同一实现（W20ModelServiceControl →
+/// models/manage-model-service.sh）。on 须 --confirm（与 UI 显式确认弹窗同语义）。
+func runModel(_ cmd: String, _ opts: Opts) {
+    let ctl = W20ModelServiceControl()
+    switch cmd {
+    case "status":
+        print(ctl.statusText)
+        let (kv, _) = ctl.statusSnapshot()
+        for k in ["state", "probe", "probe_ok", "pid", "port", "model",
+                  "mem_hint_gb", "config", "legacy_launchd"] {
+            if let v = kv[k] { print("\(k)=\(v)") }
+        }
+    case "on":
+        guard opts.confirm else {
+            // 防误触硬门实证：直接打生产 setEnabled(true, explicitConfirm:)——必须拒绝
+            // 且零副作用（UI 侧是确认弹窗后才传 explicitConfirm: true）。
+            let accepted = ctl.setEnabled(true, explicitConfirm: false)
+            print("refused: 开启本地模型需显式确认（--confirm）——不开不加载"
+                  + "（setEnabled 硬门返回 \(accepted)，应为 false）")
+            exit(2)
+        }
+        print("开启本地模型（7B）…（启动 + 健康检查，权重加载约 10–40s）")
+        let ok = ctl.setEnabled(true, explicitConfirm: true)   // 面板确认后同一调用
+        print(ok ? "on: 启动成功（\(ctl.statusText)）" : "on: 启动失败（\(ctl.statusText)）")
+        exit(ok ? 0 : 1)
+    case "off":
+        let ok = ctl.setEnabled(false, explicitConfirm: true)  // 面板关闭同一调用（立即停止）
+        print(ok ? "off: 已停止（\(ctl.statusText)）" : "off: 停止失败（\(ctl.statusText)）")
+        exit(ok ? 0 : 1)
+    default:
+        print("unknown model command: \(cmd)")
+        exit(1)
+    }
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -217,6 +274,7 @@ guard let cmd = args.first else {
       breaker status|trip|reset             [--db <interaction.db>]
       proposal demo                         提案卡 state 流转（Null 桩）
       panel-dump                            界面形态 dump
+      model status|on|off                   本地模型（7B）显式开关（on 须 --confirm）
     """)
     exit(1)
 }
@@ -234,6 +292,12 @@ case "proposal":
     runProposalDemo()
 case "panel-dump":
     runPanelDump(opts)
+case "model":
+    guard let sub = args.dropFirst().first else {
+        print("usage: w20ctl model status|on --confirm|off")
+        exit(1)
+    }
+    runModel(sub, opts)
 default:
     print("unknown command: \(cmd)")
     exit(1)

@@ -8,12 +8,12 @@
 ## 快速开始
 
 ```bash
-./models/run-llama-native.sh load    # 模型后端 launchd 托管（开机自启/崩溃拉起/日志轮转，W17）
+./models/manage-model-service.sh start   # 模型后端显式开（W30：默认不加载；开 = 启动 + 健康检查）
 cd hub && ./tls/gen-certs.sh && cd ..  # 一次性：自签 CA + HTTPS 证书（W17）
 docker compose up -d --build          # 起 Hub + nginx TLS 边车（宿主机 HTTPS 端口默认 8443）
 ./hub/smoke.sh                        # 全链路 curl 冒烟（默认 https://localhost:8443，CA 验证）
 docker compose down                   # 停（数据在 hub-data 卷，不丢）
-./models/run-llama-native.sh unload   # 不再托管模型后端
+./models/manage-model-service.sh stop  # 模型后端显式关（立即停止，幂等）
 ```
 
 > 本机宿主 8080 已被其他服务占用，故默认端口 8088；`HUB_HTTP_PORT=8080 docker compose up -d`

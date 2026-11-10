@@ -11,7 +11,8 @@
 #   SMOKE_TLS_INSECURE=1      跳过证书校验（仅调试）
 #   BASE_URL=http://localhost:8088  切回 HTTP 明文回退（hub 默认只绑 loopback）
 # 真模型 case（11b–11e）需真后端在线：
-#   默认档 = 宿主机原生 7B（models/run-llama-native.sh start|load，宿主端口 8092）
+#   默认档 = 宿主机原生 7B（models/manage-model-service.sh start——W30 起显式开关，
+#            默认不加载；宿主端口 8092）
 #   降级档 = compose --profile model 的 0.5B（MODEL_HEALTH_URL=http://localhost:8091/health）
 # 真后端档位断言（W13）：SMOKE_EXPECT_MODEL=<done 帧 model 须含的子串>，
 #   如 SMOKE_EXPECT_MODEL=qwen2.5-7b ./smoke.sh 断言真 7B 后端；

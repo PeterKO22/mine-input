@@ -51,7 +51,8 @@ final class W20SquirrelHooks {
                 breaker: W20SquirrelBreaker(),
                 engine: W20CppProposalEngine(),  // 提案卡接 C++ Null 提案桩
                 c1Control: W20SquirrelC1Control(),  // W27：C1 开关 + 状态显示
-                retentionControl: W20SquirrelRetentionControl())  // W29：记录我的回复开关
+                retentionControl: W20SquirrelRetentionControl(),  // W29：记录我的回复开关
+                modelControl: W20ModelServiceControl())  // W30：本地模型（7B）显式开关（不开不加载）
         }
         panel?.show()
     }

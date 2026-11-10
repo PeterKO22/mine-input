@@ -109,7 +109,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-    restart: unless-stopped
+    # W30 防呆审计：模型服务禁止 restart 自动拉起（restart: unless-stopped 会让
+    # Docker daemon 重启/崩溃恢复时**自动加载模型**，违反「必须用户打开才加载」硬保证）。
+    # 停在 "no"：容器只在用户显式 --profile model up 时跑，down/退出后永不自动回来。
+    # ⌥M「本地模型（7B）」开关（宿主 7B）同语义：不开不加载。
+    restart: "no"
 
 volumes:
   hub-data:

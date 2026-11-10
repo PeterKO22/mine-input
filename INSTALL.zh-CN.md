@@ -91,10 +91,18 @@ SHA256 与体积见 `voice/W2-REPORT.md` §3；Python 侧用 venv 装 `sherpa-on
 
 ### 4b. 模型服务（宿主机原生 7B，推荐）
 
+模型服务**默认关闭、绝不自启**（W30 硬保证——不开启就不加载）。开启方式：⌥M 管理浮层
+「本地模型（7B）」开关（确认资源提示 → 启动 + 健康检查），或命令行：
+
 ```bash
-./models/run-llama-native.sh load   # launchd 托管：自启/崩溃拉起/日志轮转
-./models/run-llama-native.sh status # 应显示 launchd 在 + /health 200（端口 :8092）
+./models/manage-model-service.sh start   # 显式开：启动 + 健康检查（/v1/models 或 /completion）
+./models/manage-model-service.sh status  # state=not-loaded|loading|ready + 探活结果
+./models/manage-model-service.sh stop    # 显式关：立即停止（幂等）
 ```
+
+`models/run-llama-native.sh` 是内部引擎（勿直接使用）。旧 launchd 自启
+（`load`/`unload`/`serve`、`com.mineinput.llama.plist`）已**整条删除**：登录自启/崩溃
+拉起违反「必须用户打开才加载」；`manage-model-service.sh stop/status` 另清扫历史遗留 agent。
 
 ### 4c. Hub（Docker，一台机器服务 2–5 个朋友）
 
@@ -110,13 +118,25 @@ docker compose up -d --build        # Hub + nginx TLS 边车
 
 ## 5. AI 配置（config/ai.yaml）
 
+`config/ai.yaml`（从 `config/ai.example.yaml` 复制）是 AI 链路的**唯一配置入口**——
+需要知道的就这 4 个键：
+
 ```bash
 cp config/ai.example.yaml config/ai.yaml    # 按需改 backend/model/endpoint/budget_ms
 eval "$(config/ai-env.sh)"                  # 映射为 MODEL_NAME/MODEL_URL/SUGGEST_BUDGET_MS/...
 docker compose -f hub/docker-compose.yml -f config/ai-compose.override.yml up -d
 ```
 
+| 键 | 含义 |
+|---|---|
+| `backend` | AI 后端形态：`local_gguf`（本地 llama.cpp，离线优先）/ `openai_compatible` / `hub` |
+| `model` | 模型名，如实标注在每条建议的 `source` 字段（如 `qwen2.5-7b-instruct-q4_k_m`） |
+| `endpoint` | 后端地址（本地 llama-server 基址，如 `http://127.0.0.1:8092`） |
+| `budget_ms` | 单轮建议总预算（默认 800ms；超时弃本轮，永不阻塞打字） |
+
 - 逐键说明见 [config/ai.example.yaml](config/ai.example.yaml)（backend=`local_gguf`|`openai_compatible`|`hub`）；
+- ⌥M 管理浮层显示配置路径 + 一键「打开配置」按钮（默认编辑器打开 `config/ai.yaml`，
+  首次自动从示例复制）；
 - 不想用文件：直接 export 同名环境变量（env 映射表在 ai.example.yaml 尾部），**环境变量优先**；
 - `ai-compose.override.yml` 只为把 `budget_ms` 透传进容器（compose 合并已实测），不改 `hub/` 原文件；
 - 验证：`curl --cacert hub/tls/certs/ca.crt https://localhost:8443/healthz`，再看 `/v1/suggest`
@@ -128,7 +148,7 @@ docker compose -f hub/docker-compose.yml -f config/ai-compose.override.yml up -d
 bash build/uninstall-dev.sh         # macOS：移除 Squirrel-dev.app + Rime-mine-dev（只删自己的）
 adb uninstall com.mineinput.ime     # Android
 docker compose down                 # Hub（数据在 hub-data 卷，不丢）
-./models/run-llama-native.sh unload # 模型服务
+./models/manage-model-service.sh stop  # 模型服务（关 = 未加载；幂等）
 ```
 
 ## 7. 故障速查
@@ -138,7 +158,7 @@ docker compose down                 # Hub（数据在 hub-data 卷，不丢）
 | librime 编译报「platform no longer supported by libc++」 | 清 `core/librime/deps/*/build` 重跑（脚本已固定 `MACOSX_DEPLOYMENT_TARGET=13.0`） |
 | 装完切换输入法后打不出字 | 旧进程占 inode：重跑 `install-dev.sh`（内含 pkill + 存活门），看 IMK 端点日志 |
 | Android 构建缺 AAR/.so | 重跑 `android/fetch-deps.sh` / `android/fetch-rime-jni.sh`（幂等，SHA256 校验） |
-| Hub suggest 降级成 stub | 模型服务没起：`models/run-llama-native.sh status`；或 `SUGGEST_ALLOW_STUB_FALLBACK=0` 强制不降级 |
+| Hub suggest 降级成 stub | 模型服务没起（**默认就是关的**——⌥M「本地模型（7B）」开关或 `models/manage-model-service.sh start` 显式开）：`models/manage-model-service.sh status`；或 `SUGGEST_ALLOW_STUB_FALLBACK=0` 强制不降级 |
 | curl 报证书错 | 没带 `--cacert hub/tls/certs/ca.crt`（自签 CA 必须显式信任） |
 | 7B 在 Docker VM OOM | 用宿主机原生跑（§4b）或 0.5B 降级档（`MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m`） |
 | 恢复备份后 token 全失效 | 备份包内 `hub-secret` 与现网不同——用备份同包恢复或重新登录 |

@@ -21,6 +21,8 @@ public final class W20MemoryPanel: NSObject {
     private let c1Control: W20C1Control?
     /// W29：「记录我的回复（用于记忆与推荐）」开关（上屏文本留存 L3；nil = 无留存面，隐藏）。
     private let retentionControl: W20RetentionControl?
+    /// W30：「本地模型（7B）」显式开关（不开不加载；nil = 无模型面，隐藏）。
+    private let modelControl: W20ModelControl?
 
     private var panel: NSPanel?
     private var filtered: [W20MemoryEntry] = []
@@ -40,6 +42,12 @@ public final class W20MemoryPanel: NSObject {
     private let retainStatusLabel = NSTextField(labelWithString: "")
     private let retainLabel = NSTextField(labelWithString: "记录我的回复（用于记忆与推荐）")
     private let retainSwitch = NSSwitch()
+    // W30：本地模型（7B）显式开关 + 状态显示 + 配置入口
+    private let modelStatusLabel = NSTextField(labelWithString: "")
+    private let modelLabel = NSTextField(labelWithString: "本地模型（7B）")
+    private let modelSwitch = NSSwitch()
+    private let modelConfigLabel = NSTextField(labelWithString: "")
+    private let modelConfigButton = NSButton(title: "打开配置", target: nil, action: nil)
 
     // 记忆时间线
     private let searchField = NSSearchField()
@@ -59,12 +67,14 @@ public final class W20MemoryPanel: NSObject {
 
     public init(store: W20MemoryStore, breaker: W20BreakerControl?,
                 engine: W20ProposalEngine, c1Control: W20C1Control? = nil,
-                retentionControl: W20RetentionControl? = nil) {
+                retentionControl: W20RetentionControl? = nil,
+                modelControl: W20ModelControl? = nil) {
         self.store = store
         self.breaker = breaker
         self.engine = engine
         self.c1Control = c1Control
         self.retentionControl = retentionControl
+        self.modelControl = modelControl
         super.init()
     }
 
@@ -142,6 +152,27 @@ public final class W20MemoryPanel: NSObject {
         retainStatusLabel.isHidden = !hasRetain
         retainLabel.isHidden = !hasRetain
         retainSwitch.isHidden = !hasRetain
+        // W30：「本地模型（7B）」显式开关（默认关；开启弹资源提示确认，确认→启动+健康检查；
+        // 关闭→立即停止）+ 配置入口（config/ai.yaml 路径 + 一键默认编辑器打开）
+        modelStatusLabel.font = W20Font.mono(11)
+        modelStatusLabel.textColor = W20Color.cyan
+        modelLabel.font = W20Font.body()
+        modelLabel.textColor = W20Color.dimText
+        modelSwitch.target = self
+        modelSwitch.action = #selector(onModelToggled)
+        modelConfigLabel.font = W20Font.mono(10)
+        modelConfigLabel.textColor = W20Color.dimText
+        modelConfigLabel.lineBreakMode = .byTruncatingMiddle
+        modelConfigLabel.maximumNumberOfLines = 1
+        W20Style.secondaryButton(modelConfigButton, title: "打开配置")
+        modelConfigButton.target = self
+        modelConfigButton.action = #selector(onOpenModelConfig)
+        let hasModel = modelControl != nil
+        modelStatusLabel.isHidden = !hasModel
+        modelLabel.isHidden = !hasModel
+        modelSwitch.isHidden = !hasModel
+        modelConfigLabel.isHidden = !hasModel
+        modelConfigButton.isHidden = !hasModel
 
         let topRow = NSStackView(views: [
             statusDot, statusLabel, countsLabel, NSView(),
@@ -156,6 +187,15 @@ public final class W20MemoryPanel: NSObject {
         retainRow.orientation = .horizontal
         retainRow.spacing = 10
         retainRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
+        // W30：本地模型（7B）行——状态 + 开关 + 配置入口
+        let modelRow = NSStackView(views: [
+            modelStatusLabel, modelLabel, modelSwitch, NSView(),
+            modelConfigLabel, modelConfigButton,
+        ])
+        modelRow.orientation = .horizontal
+        modelRow.spacing = 10
+        modelRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
+        modelConfigLabel.widthAnchor.constraint(equalToConstant: 320).isActive = true
 
         // ---- 分段：记忆时间线 / 提案卡 ----
         tabControl.segmentCount = 2
@@ -186,7 +226,7 @@ public final class W20MemoryPanel: NSObject {
             topBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             topBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             topBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            topBar.heightAnchor.constraint(equalToConstant: 80),
+            topBar.heightAnchor.constraint(equalToConstant: 116),
             tabControl.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
             tabControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             memoryPage.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 12),
@@ -199,8 +239,8 @@ public final class W20MemoryPanel: NSObject {
             proposalPage.bottomAnchor.constraint(equalTo: memoryPage.bottomAnchor),
         ])
 
-        // topBar 内部：两行（状态行 + W29 留存开关行）
-        let topStack = NSStackView(views: [topRow, retainRow])
+        // topBar 内部：三行（状态行 + W29 留存开关行 + W30 本地模型行）
+        let topStack = NSStackView(views: [topRow, retainRow, modelRow])
         topStack.orientation = .vertical
         topStack.spacing = 0
         topBar.addSubview(topStack)
@@ -373,6 +413,12 @@ public final class W20MemoryPanel: NSObject {
         if let r = retentionControl {
             retainSwitch.state = r.isRetentionEnabled ? .on : .off
             retainStatusLabel.stringValue = r.statusText
+        }
+        // W30：本地模型开关与状态显示（未加载/加载中/就绪 + 探活结果）
+        if let m = modelControl {
+            modelSwitch.state = m.isServiceRunning ? .on : .off
+            modelStatusLabel.stringValue = m.statusText
+            modelConfigLabel.stringValue = "配置 \(m.configPath)"
         }
     }
 
@@ -587,6 +633,63 @@ public final class W20MemoryPanel: NSObject {
 
     @objc private func onTabChanged() {
         applyTab()
+    }
+
+    /// W30：「本地模型（7B）」显式开关。开启走**显式确认弹窗**（资源提示：约 X GB 内存/
+    /// 仅本机推理），确认后才 `setEnabled(true, explicitConfirm: true)`（启动服务 + 健康检查，
+    /// 7B 权重加载约 10–40s——后台执行不阻塞输入，状态行先置「加载中」）；取消则开关拨回
+    /// （绝不静默加载）。关闭 = 立即停止服务并释放内存。
+    @objc private func onModelToggled() {
+        guard let m = modelControl else { return }
+        if modelSwitch.state == .on {
+            let alert = NSAlert()
+            alert.messageText = m.consentTitle
+            alert.informativeText = m.consentText
+            alert.addButton(withTitle: "开启")
+            alert.addButton(withTitle: "取消")
+            if alert.runModal() == .alertFirstButtonReturn {
+                modelStatusLabel.stringValue = "本地模型：加载中…（7B 权重加载约 10–40s）"
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let ok = m.setEnabled(true, explicitConfirm: true)
+                    DispatchQueue.main.async {
+                        if !ok { self.modelSwitch.state = .off }
+                        self.refreshStatus()
+                    }
+                }
+            } else {
+                modelSwitch.state = .off  // 未确认 = 不加载
+                refreshStatus()
+            }
+        } else {
+            modelStatusLabel.stringValue = "本地模型：停止中…"
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = m.setEnabled(false, explicitConfirm: true)
+                DispatchQueue.main.async { self.refreshStatus() }
+            }
+        }
+    }
+
+    /// W30：配置入口——config/ai.yaml（唯一配置入口）用默认编辑器打开。
+    /// 文件不存在时先从 ai.example.yaml 复制（与文档「cp config/ai.example.yaml
+    /// config/ai.yaml」同一步），再打开；不改动其他任何文件。
+    @objc private func onOpenModelConfig() {
+        guard let m = modelControl else { return }
+        let fm = FileManager.default
+        let cfg = m.configPath
+        if !fm.fileExists(atPath: cfg) {
+            let example = (cfg as NSString).deletingLastPathComponent + "/ai.example.yaml"
+            if fm.fileExists(atPath: example) {
+                try? fm.copyItem(atPath: example, toPath: cfg)
+            }
+        }
+        if fm.fileExists(atPath: cfg) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: cfg))
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "找不到配置文件"
+            alert.informativeText = "config/ai.yaml 与 ai.example.yaml 均不存在：\(cfg)"
+            alert.runModal()
+        }
     }
 
     private func applyTab() {
