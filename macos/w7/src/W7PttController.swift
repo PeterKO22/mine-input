@@ -12,6 +12,10 @@
  *   - AVAudioEngine 采集 → 16k mono 环形缓冲（纯内存，音频不落盘）→
  *     voice/mic/ptt_daemon.py（W2 管线常驻：Silero VAD→SenseVoice int8→
  *     CT-Transformer 标点→hotwords.txt 热词）→ 文本经 SquirrelInputController 上屏；
+ *   - W31 记录员模式（W7RecorderTranscript）：录音中每 10s 或明显断句（静音 ≥0.6s）
+ *     把已完成音频段送 daemon 转写，文本追加「显示用实时稿」只上面板不进输入框
+ *     （「🎙 速记：…｜正在听…」，锁定态持续更新）；停止时最后一段转写→全稿合并
+ *     →一次性 w7CommitVoiceText 上屏；Esc 全部丢弃；
  *   - 低置信不瞎猜：启发式判低置信时不 commit，面板提示「没听清，请重说」。
  *
  * 任务 (b) 的 Swift 侧在 SquirrelInputController.swift（build/squirrel-w7.patch 注入的
@@ -54,13 +58,14 @@ final class W7RingBuffer {
   private var buf: [Float]
   private var head = 0    // 下一写入位
   private var count = 0
+  private var totalWritten = 0  // W31: 累计写入样本数（绝对位移，切段用）
   private let lock = NSLock()
 
   init(capacity: Int) { buf = [Float](repeating: 0, count: capacity) }
 
   func reset() {
     lock.lock(); defer { lock.unlock() }
-    head = 0; count = 0
+    head = 0; count = 0; totalWritten = 0
   }
 
   /// 满则覆盖最旧（环形语义）；capacity = 60s@16k，超长录音自动丢最旧段。
@@ -71,6 +76,13 @@ final class W7RingBuffer {
       head = (head + 1) % buf.count
       if count < buf.count { count += 1 }
     }
+    totalWritten += n
+  }
+
+  /// 绝对样本位移（W31 分段切片的段界基准）。
+  var absoluteCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return totalWritten
   }
 
   /// 导出为 16k mono PCM16LE（内存 bytes，交 daemon → 管线，全程不落盘）。
@@ -85,6 +97,22 @@ final class W7RingBuffer {
     }
     return data
   }
+
+  /// W31: 绝对样本区间 [from, to) 的 PCM16LE 切片（已完成段导出；
+  /// 越出环形窗口自动夹取——切段每 ≤10s 一次，正常不会越窗）。
+  func pcm16Slice(from: Int, to: Int) -> Data {
+    lock.lock(); defer { lock.unlock() }
+    let lo = max(from, totalWritten - count)
+    let hi = min(to, totalWritten)
+    guard hi > lo else { return Data() }
+    var data = Data(capacity: (hi - lo) * 2)
+    for i in lo..<hi {
+      let s = max(-1.0 as Float, min(1.0 as Float, buf[i % buf.count]))
+      var le = Int16(s * 32767.0).littleEndian
+      withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
+    }
+    return data
+  }
 }
 
 // MARK: - AVAudioEngine 采集（16k mono）
@@ -94,6 +122,12 @@ final class W7AudioCapture {
   private var converter: AVAudioConverter?
   private let ring = W7RingBuffer(capacity: 16000 * 60)  // 60s 上限
   private var running = false
+
+  /// W31: 静音块回调（逐块 RMS 启发式；明显断句的时长阈值见
+  /// W7RecorderTranscriptFormat.gapSilenceSeconds）。回调在采集线程。
+  var onChunk: ((Bool) -> Void)?
+  /// W31: 静音判定阈值（16k 转换后 RMS，命名常量）——与 daemon VAD 结论对齐的轻量启发式。
+  static let silenceRMS: Double = 0.01
 
   func start() throws {
     guard !running else { return }
@@ -133,9 +167,21 @@ final class W7AudioCapture {
       return buffer
     }
     if error == nil, let ch = out.floatChannelData {
-      ring.append(ch[0], count: Int(out.frameLength))
+      let n = Int(out.frameLength)
+      var sum2 = 0.0
+      for i in 0..<n { let v = Double(ch[0][i]); sum2 += v * v }
+      ring.append(ch[0], count: n)
+      // W31: 逐块 RMS 静音判定（明显断句启发式输入）
+      let rms = n > 0 ? (sum2 / Double(n)).squareRoot() : 1.0
+      onChunk?(rms < Self.silenceRMS)
     }
   }
+
+  /// W31: 绝对样本位移（分段切片的段界基准）。
+  var sampleCount: Int { ring.absoluteCount }
+
+  /// W31: 已完成段音频导出（绝对样本区间切片，内存 bytes）。
+  func segmentPCM16(from: Int, to: Int) -> Data { ring.pcm16Slice(from: from, to: to) }
 
   func stop() -> Data {
     if running {
@@ -311,12 +357,45 @@ final class W7PttController {
   )
   /// W28: PTT 锁定态状态机（录音/锁定相位 + 时长判定，时钟可注入）。
   private let machine = W7PttLockMachine()
-  /// 锁定阈值检查定时器（按住跨过 lockThresholdSeconds → machine.tick() → 锁定提示）。
+  /// W31: 记录员模式分段转写会话（10s/断句切段 → 速记稿 → 停止合并上屏）。
+  private let session = W7RecorderTranscriptSession()
+  /// W31: 当前未转写段的起始样本位移（绝对位移切片）。
+  private var segStartSample = 0
+  /// 锁定阈值 + 10s 分段的合并检查定时器（取两者最近期限驱动 tick）。
   private var lockTickItem: DispatchWorkItem?
   /// 录音或锁定中（音频采集进行时）——W12SquirrelGlue.fromVoice 等外部只读。
   var isCapturing: Bool { machine.phase != .idle }
 
   private init() {
+    // W31: 分段转写会话接线（mock 可测面在 W7RecorderTranscriptSession，此处为生产实现）
+    session.isLocked = { [weak self] in self?.machine.phase == .locked }
+    session.takeSegmentAudio = { [weak self] in
+      guard let self else { return Data() }
+      let to = self.capture.sampleCount
+      let data = self.capture.segmentPCM16(from: self.segStartSample, to: to)
+      self.segStartSample = to
+      return data
+    }
+    session.transcribe = { [weak self] pcm, done in
+      guard let self else {
+        done(W7SegmentResult(text: "", lowConfidence: true, error: "语音守护进程不可用"))
+        return
+      }
+      self.daemon.transcribe(pcm) { result in
+        // 会话状态只在主线程变更（回调从 daemon 队列 hop 回来）
+        DispatchQueue.main.async {
+          done(W7SegmentResult(text: result.text, lowConfidence: result.lowConfidence,
+                               error: result.error))
+        }
+      }
+    }
+    session.onDisplay = { [weak self] line in
+      self?.controller?.w7ShowRecorderLine(line)
+    }
+    // W31: 采集侧逐块静音观测（断句启发式）；hop 主线程保持会话单线程
+    capture.onChunk = { [weak self] silent in
+      DispatchQueue.main.async { self?.session.noteAudioChunk(silent: silent) }
+    }
     daemon.warmup()  // 首次触碰即预热模型，松开→上屏只等管线推理
   }
 
@@ -386,7 +465,7 @@ final class W7PttController {
     return false
   }
 
-  /// W28: 状态机动作 → 副作用。machine 已完成相位迁移，这里只做采集/面板/转写。
+  /// W28/W31: 状态机动作 → 副作用。machine 已完成相位迁移，这里只做采集/面板/转写。
   private func handle(_ action: W7PttAction) {
     switch action {
     case .none:
@@ -394,31 +473,43 @@ final class W7PttController {
     case .beginRecording:
       beginCapture()
     case .lock, .relock:
-      // 锁定态面板（🔒 已锁定 · 可以松开按键了），与聆听态 🎙 明显区分；
-      // 仍处 PTT 语音窗内（不收口 W12 触发窗，无 notePttEnd）。
-      controller?.w7ShowLockedHint()
+      // 锁定态面板：W28 锁定提示行（🔒 已锁定 · 可以松开按键了）+ W31 速记稿行
+      // 多行共存持续更新；仍处 PTT 语音窗内（不收口 W12 触发窗，无 notePttEnd）。
+      refreshRecorderPanel()
     case .stopAndProcess:
       stopAndProcess()
     case .cancel(let reason):
       cancelCapture(reason: reason == .escape ? "已取消录音（Esc）" : "已取消录音（检测到组合键）")
     }
-    scheduleLockTickIfNeeded()
+    scheduleTimersIfNeeded()
   }
 
   private func beginCapture() {
     do {
       try capture.start()
-      controller?.w7ShowRecordingHint()
+      segStartSample = 0
+      session.start()                 // W31: 速记稿复位 + 排 10s 分段定时
+      controller?.w7ShowRecordingHint()  // W12: notePttStart（触发窗开）
+      refreshRecorderPanel()          // W31: 面板换为记录员视图「🎙 速记：正在听…」
     } catch {
       machine.reset()  // 采集起不来不进录音态
+      session.abort()
       controller?.w7ShowVoiceStatus("无法启动麦克风采集（检查麦克风权限）：\(error.localizedDescription)")
     }
   }
 
-  /// 锁定阈值检查定时器：驱动 machine.tick()（按住跨过 lockThresholdSeconds → 锁定提示）。
-  /// 单测不经过此处——W7PttLockMachine 伪时钟直调 tick（零 sleep）。
-  private func scheduleLockTickIfNeeded() {
-    guard let remain = machine.secondsToThreshold() else {
+  /// W31: 面板速记稿刷新（录制/锁定中持续更新；不进输入框）。
+  private func refreshRecorderPanel() {
+    controller?.w7ShowRecorderLine(session.panelLine())
+  }
+
+  /// 锁定阈值 + W31 10s 分段的合并检查定时器：取两者最近期限驱动
+  /// machine.tick()（锁定提示）与 session.tick()（分段转写）。
+  /// 单测不经过此处——两台机器都伪时钟直调 tick（零 sleep）。
+  private func scheduleTimersIfNeeded() {
+    let remain = [machine.secondsToThreshold(), session.secondsToNextTick()]
+      .compactMap { $0 }.min()
+    guard let remain else {
       lockTickItem?.cancel()
       lockTickItem = nil
       return
@@ -426,6 +517,7 @@ final class W7PttController {
     lockTickItem?.cancel()
     let item = DispatchWorkItem { [weak self] in
       guard let self else { return }
+      self.session.tick()               // 10s 分段（推进后 handle 按新期限重排）
       self.handle(self.machine.tick())  // 提前醒来时 handle 会按剩余时间重排
     }
     lockTickItem = item
@@ -434,9 +526,31 @@ final class W7PttController {
 
   private func stopAndProcess() {
     lockTickItem?.cancel()
-    let pcm = capture.stop()  // 环形缓冲导出（内存），随后即弃
-    processPCM(pcm, source: "ptt") { [weak self] in
-      self?.controller?.w7ShowVoiceStatus("识别中…")
+    let full = capture.stop()  // 全量 PCM 只作 W26 空音频诊断；分段音频走切片
+    if let reason = Self.emptyAudioReason(full) {
+      session.abort()
+      W26Probe.log(["event": "status", "source": "ptt", "text": reason])
+      controller?.w7ShowVoiceStatus(reason)
+      return
+    }
+    controller?.w7ShowVoiceStatus("识别中…")
+    // W31: 最后一段转写 → 等全部段落齐 → 全稿合并（标点拼接规则见
+    // W7RecorderTranscriptFormat.mergedText）→ 一次性 w7CommitVoiceText 上屏
+    session.stop { [weak self] outcome in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        switch outcome {
+        case .commit(let text):
+          let target = self.controller ?? NSApp.squirrelAppDelegate.panel?.inputController
+          W26Probe.log(["event": "commit", "source": "ptt", "text": text,
+                        "controller": target != nil])
+          target?.w7CommitVoiceText(text)
+        case .empty:
+          // 低置信/空段全被滤掉：不瞎猜，提示重说（沿用 W7 启发式）
+          W26Probe.log(["event": "status", "source": "ptt", "text": "没听清，请重说"])
+          self.controller?.w7ShowVoiceStatus("没听清，请重说")
+        }
+      }
     }
   }
 
@@ -493,6 +607,7 @@ final class W7PttController {
   private func cancelCapture(reason: String) {
     lockTickItem?.cancel()
     _ = capture.stop()  // 丢弃，不送识别
+    session.abort()     // W31: 速记稿一并丢弃（Esc 全部丢弃；迟到转写忽略）
     controller?.w7ShowVoiceStatus(reason)
   }
 }

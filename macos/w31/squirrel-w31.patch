@@ -1,0 +1,64 @@
+# W31 recorder-live-transcript 集成补丁（可复现记录；前置 dev+w7+w12+w20+w26+w27+w28 补丁链）
+#
+# 修改 Squirrel 既有 2 文件：
+#   - sources/SquirrelInputController.swift：新增 w7ShowRecorderLine()——W31 记录员
+#     模式实时速记稿面板行（「🎙 速记：…｜正在听…」；锁定态 = W28 锁定提示行 + 速记行
+#     多行共存持续更新）；只上面板不写客户端 marked text、不进输入框、不触碰 W12 触发窗。
+#   - Squirrel.xcodeproj/project.pbxproj：编入 ../w7/src/W7RecorderTranscript.swift
+#     （W31 分段转写会话，FA70…A7/B7 id）——macos/w7 为唯一事实源。
+#
+# 应用方式：在已套用 dev+w7+w12+w20+w26+w27+w28 补丁链的 macos/squirrel 上
+#   bash macos/w31/scripts/apply-w31.sh
+--- a/sources/SquirrelInputController.swift
++++ b/sources/SquirrelInputController.swift
+@@ -727,6 +727,16 @@
+   /// 仍处 PTT 语音窗内（继续采集免手持），不收口 W12 触发窗（无 notePttEnd）。
+   func w7ShowLockedHint() {
+     showPanel(preedit: "🔒 已锁定录音中…（可以松开按键了 · 轻点右⌘ 停止上屏 · Esc 取消）",
++              selRange: NSRange(location: 0, length: 0), caretPos: 0,
++              candidates: [], comments: [], labels: [],
++              highlighted: -1, page: 0, lastPage: true)
++  }
++
++  /// W31: 录音中实时速记稿（记录员模式）面板行（多行：锁定态 = W28 锁定提示行 +
++  /// 速记行「🎙 速记：…｜正在听…」持续更新）。只上面板不写客户端 marked text
++  /// 不进输入框；不触碰 W12 触发窗收放（无 notePttStart/notePttEnd）。
++  func w7ShowRecorderLine(_ line: String) {
++    showPanel(preedit: line,
+               selRange: NSRange(location: 0, length: 0), caretPos: 0,
+               candidates: [], comments: [], labels: [],
+               highlighted: -1, page: 0, lastPage: true)
+--- a/Squirrel.xcodeproj/project.pbxproj
++++ b/Squirrel.xcodeproj/project.pbxproj
+@@ -101,6 +101,7 @@
+ 		FA70000000000000000000B4 /* timeout_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A4 /* timeout_assist.cc */; };
+ 		FA70000000000000000000B5 /* null_ai_assist.cc in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A5 /* null_ai_assist.cc */; };
+ 		FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A6 /* W7PttLockMachine.swift */; };
++		FA70000000000000000000B7 /* W7RecorderTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA70000000000000000000A7 /* W7RecorderTranscript.swift */; };
+ 		FA7200000000000000000001 /* W12Digest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000001 /* W12Digest.swift */; };
+ 		FA7200000000000000000002 /* W12Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000002 /* W12Config.swift */; };
+ 		FA7200000000000000000003 /* W12OCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7100000000000000000003 /* W12OCR.swift */; };
+@@ -345,6 +346,7 @@
+ 		FA70000000000000000000A4 /* timeout_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = timeout_assist.cc; path = ../../ai/spi/timeout_assist.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A5 /* null_ai_assist.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = null_ai_assist.cc; path = ../../ai/backends/null/null_ai_assist.cc; sourceTree = "<group>"; };
+ 		FA70000000000000000000A6 /* W7PttLockMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7PttLockMachine.swift; path = ../w7/src/W7PttLockMachine.swift; sourceTree = "<group>"; };
++		FA70000000000000000000A7 /* W7RecorderTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W7RecorderTranscript.swift; path = ../w7/src/W7RecorderTranscript.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000001 /* W12Digest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Digest.swift; path = ../w12/src/W12Digest.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000002 /* W12Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12Config.swift; path = ../w12/src/W12Config.swift; sourceTree = "<group>"; };
+ 		FA7100000000000000000003 /* W12OCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = W12OCR.swift; path = ../w12/src/W12OCR.swift; sourceTree = "<group>"; };
+@@ -405,6 +407,7 @@
+ 				B38E9B8F2BE9AE1E0036ABEF /* Squirrel-Bridging-Header.h */,
+ 				FA70000000000000000000A1 /* W7PttController.swift */,
+ 				FA70000000000000000000A6 /* W7PttLockMachine.swift */,
++				FA70000000000000000000A7 /* W7RecorderTranscript.swift */,
+ 				FA70000000000000000000A2 /* W7RescoreBridge.mm */,
+ 				FA70000000000000000000A3 /* W7RescoreHook.cc */,
+ 				FA70000000000000000000A4 /* timeout_assist.cc */,
+@@ -703,6 +706,7 @@
+ 				B3A001022F260100009D156B /* ReservedProperty.swift in Sources */,
+ 				FA70000000000000000000B1 /* W7PttController.swift in Sources */,
+ 				FA70000000000000000000B6 /* W7PttLockMachine.swift in Sources */,
++				FA70000000000000000000B7 /* W7RecorderTranscript.swift in Sources */,
+ 				FA70000000000000000000B2 /* W7RescoreBridge.mm in Sources */,
+ 				FA70000000000000000000B3 /* W7RescoreHook.cc in Sources */,
+ 				FA70000000000000000000B4 /* timeout_assist.cc in Sources */,
