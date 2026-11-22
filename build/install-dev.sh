@@ -11,6 +11,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SQ_SRC="$ROOT/macos/squirrel"
 APP_SRC="$SQ_SRC/build/Build/Products/Release/Squirrel.app"
+# 产物新鲜度硬门（W31 事故：车道构建进了 Xcode DerivedData，安装取到 14 天前的旧产物）：
+# macos/ 下任何源文件比产物二进制新即中止——装旧货的功能缺失极难从症状倒推。
+if [ "${INSTALL_STALE:-0}" != "1" ]; then
+  NEWEST_SRC="$(find "$SQ_SRC" -name '*.swift' -not -path '*/build/*' -newer "$APP_SRC/Contents/MacOS/Squirrel" 2>/dev/null | head -1)"
+  if [ -n "$NEWEST_SRC" ]; then
+    echo "ERROR: 构建产物过期（源文件更新：$NEWEST_SRC）——先跑：bash build/build-squirrel.sh" >&2
+    echo "  （确认要装旧产物：INSTALL_STALE=1 bash build/install-dev.sh）" >&2
+    exit 1
+  fi
+fi
 IM_DIR="$HOME/Library/Input Methods"
 APP_DST="$IM_DIR/Squirrel-dev.app"
 RIME_DIR="$HOME/Library/Rime-mine-dev"
