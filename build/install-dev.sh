@@ -97,6 +97,30 @@ echo "-- IMK 端口注册证据（InputMethodConnectionName=Squirrel_Dev_Connect
 log show --last 1m --predicate 'process == "Squirrel"' --style compact 2>/dev/null \
   | grep -E "inputmethodkit|Activate Server" | tail -3 || true
 
+echo "== [4.5/5] 注销野副本并断言进程归属（W31 事故防复发）=="
+# 事故（W31 实测）：Xcode 构建树 / DerivedData 的 Squirrel.app 同 bundle id，被系统按旧注册
+# 路径拉起 → 抢走 IMK 连接 + TCC 身份不匹配「录屏权限」一直弹。对策：装机后把一切非装机
+# 副本从 LaunchServices 注销，杀掉非装机路径的同名进程，并断言活进程必须来自 $APP_DST。
+for WILD in "$ROOT/macos/squirrel/build/Build/Products/Release/Squirrel.app" \
+            "$HOME"/Library/Developer/Xcode/DerivedData/Squirrel-*/Build/Products/Release/Squirrel.app; do
+  [ -d "$WILD" ] || continue
+  "$LSREGISTER" -u "$WILD" 2>/dev/null || true
+  echo "  已注销野副本: $WILD"
+done
+for P in $(pgrep -f "Squirrel.app/Contents/MacOS/Squirrel" 2>/dev/null); do
+  CMD="$(ps -p "$P" -o command= 2>/dev/null || true)"
+  case "$CMD" in
+    "$APP_DST"*) ;;
+    *) echo "  杀冒充进程: pid=$P ($CMD)"; kill "$P" 2>/dev/null || true ;;
+  esac
+done
+sleep 1
+LIVE="$(ps -axo command= | grep 'Squirrel.app/Contents/MacOS/Squirrel' | grep -v grep | head -1 || true)"
+case "$LIVE" in
+  "$APP_DST"*) echo "进程归属断言通过: $LIVE" ;;
+  *) echo "ERROR: 活进程不是装机版（$LIVE）——请重跑本脚本" >&2; exit 1 ;;
+esac
+
 echo "== [4b/5] TIS 可见性硬门（W26 事故：切不到输入法）=="
 # 实测事故：bundle/签名/进程全好，但会话级 TIS 清单丢了输入源——用户切不到输入法。
 # 装完必须探针 PASS 才算数；FAIL 给恢复路径并中止（TIS_GATE=0 可跳过）。
