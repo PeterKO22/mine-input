@@ -12,8 +12,9 @@ import ContextCore
 ///     `W12Privacy.enableC1(explicitConfirm: true)` 显式开启，`disableC1()` 关闭；
 ///   - 两者任一为开才允许 C1 采集；C0（输入历史/应用名）不受影响。
 ///
-/// 子开关：`W12C1Screen`（屏幕快照→OCR）、`W12C1Audio`（音频→W2 管线→ASR），
-/// 均默认 true（在 C1 总开关打开的前提下生效）。
+/// 子开关：`W12C1Screen`（屏幕快照→OCR，**W32 起默认关**——「屏幕上下文默认 OFF」，
+/// ⌥M「读取屏幕内容以增强候选（需授权）」显式开启（持久 meta `c1_screen`）或 dev 直通）、
+/// `W12C1Audio`（音频→W2 管线→ASR），在 C1 总开关打开的前提下生效。
 public struct W12Settings {
     public var c1Enabled: Bool
     public var c1Screen: Bool
@@ -30,7 +31,7 @@ public struct W12Settings {
 
     public init(
         c1Enabled: Bool = false,
-        c1Screen: Bool = true,
+        c1Screen: Bool = false,
         c1Audio: Bool = true,
         prompterEnabled: Bool = true,
         prompterBackend: String = "null",
@@ -60,7 +61,7 @@ public struct W12Settings {
                 .map { ($0 as NSString).expandingTildeInPath }
         }
         s.c1Enabled = bool("W12C1Enabled", false)   // 默认关：显式开启才采 C1
-        s.c1Screen = bool("W12C1Screen", true)
+        s.c1Screen = bool("W12C1Screen", false)     // W32：屏幕上下文默认 OFF（显式开关才读屏）
         s.c1Audio = bool("W12C1Audio", true)
         s.prompterEnabled = bool("W12PrompterEnabled", true)
         s.prompterBackend = str("W12PrompterBackend") ?? "null"
@@ -104,6 +105,31 @@ public enum W12Privacy {
     /// 运行时显式开关状态（meta）。
     public static func isC1ExplicitlyEnabled(store: InteractionStore) -> Bool {
         store.metaGet("c1_enabled") == "1"
+    }
+
+    // ------------------------------------------------ W32 读屏（屏幕上下文）显式开关
+
+    /// W32 ⌥M 开关文案（「读取屏幕内容以增强候选（需授权）」——开关本体的 label）。
+    public static let screenSwitchTitle = "读取屏幕内容以增强候选（需授权）"
+
+    /// 显式开启读屏（持久 meta `c1_screen`，跨进程默认关；开启动作是 **CGRequestScreenCaptureAccess
+    /// 一次性授权请求的唯一发起点**——由 ⌥M 开关打开时调用，平时采集只 preflight 探活）。
+    @discardableResult
+    public static func enableC1Screen(store: InteractionStore, explicitConfirm: Bool) -> Bool {
+        guard explicitConfirm else { return false }
+        store.metaSet("c1_screen", "1")
+        return true
+    }
+
+    /// 关闭读屏（关闭即清屏幕上下文环——「随时可关」的落法）。
+    public static func disableC1Screen(store: InteractionStore) {
+        store.metaSet("c1_screen", "0")
+        ScreenTextContext.shared.clear()
+    }
+
+    /// 读屏显式开关状态（meta，跨进程；默认关）。
+    public static func isC1ScreenEnabled(store: InteractionStore) -> Bool {
+        store.metaGet("c1_screen") == "1"
     }
 
     // -------------------------------------------------------- W29 上屏文本留存（L3）

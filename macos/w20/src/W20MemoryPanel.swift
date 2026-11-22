@@ -19,6 +19,9 @@ public final class W20MemoryPanel: NSObject {
     private let engine: W20ProposalEngine
     /// W27：C1 屏幕/语音采集开关（⌥M 管理浮层 C1 开关与状态显示；nil = 无 C1 面，隐藏）。
     private let c1Control: W20C1Control?
+    /// W32：「读取屏幕内容以增强候选（需授权）」读屏开关（C1 屏幕上下文显式 opt-in；
+    /// nil = 无读屏面，隐藏）。打开开关才发起一次性 CGRequestScreenCaptureAccess 授权请求。
+    private let screenControl: W20ScreenContextControl?
     /// W29：「记录我的回复（用于记忆与推荐）」开关（上屏文本留存 L3；nil = 无留存面，隐藏）。
     private let retentionControl: W20RetentionControl?
     /// W30：「本地模型（7B）」显式开关（不开不加载；nil = 无模型面，隐藏）。
@@ -38,6 +41,10 @@ public final class W20MemoryPanel: NSObject {
     private let c1StatusLabel = NSTextField(labelWithString: "")
     private let c1Label = NSTextField(labelWithString: "C1 屏幕/语音")
     private let c1Switch = NSSwitch()
+    // W32：读屏开关（读取屏幕内容以增强候选）+ 状态显示（未授权显示「读屏未授权」）
+    private let screenStatusLabel = NSTextField(labelWithString: "")
+    private let screenLabel = NSTextField(labelWithString: "读取屏幕内容以增强候选（需授权）")
+    private let screenSwitch = NSSwitch()
     // W29：记录我的回复（上屏文本留存 L3）开关 + 状态显示
     private let retainStatusLabel = NSTextField(labelWithString: "")
     private let retainLabel = NSTextField(labelWithString: "记录我的回复（用于记忆与推荐）")
@@ -67,12 +74,14 @@ public final class W20MemoryPanel: NSObject {
 
     public init(store: W20MemoryStore, breaker: W20BreakerControl?,
                 engine: W20ProposalEngine, c1Control: W20C1Control? = nil,
+                screenControl: W20ScreenContextControl? = nil,
                 retentionControl: W20RetentionControl? = nil,
                 modelControl: W20ModelControl? = nil) {
         self.store = store
         self.breaker = breaker
         self.engine = engine
         self.c1Control = c1Control
+        self.screenControl = screenControl
         self.retentionControl = retentionControl
         self.modelControl = modelControl
         super.init()
@@ -141,6 +150,18 @@ public final class W20MemoryPanel: NSObject {
         c1StatusLabel.isHidden = !hasC1
         c1Label.isHidden = !hasC1
         c1Switch.isHidden = !hasC1
+        // W32：读屏开关「读取屏幕内容以增强候选（需授权）」+ 状态显示（默认关；
+        // 打开开关才一次性发起 CGRequestScreenCaptureAccess；平时按键采集只探活不请求）
+        screenStatusLabel.font = W20Font.mono(11)
+        screenStatusLabel.textColor = W20Color.cyan
+        screenLabel.font = W20Font.body()
+        screenLabel.textColor = W20Color.dimText
+        screenSwitch.target = self
+        screenSwitch.action = #selector(onScreenToggled)
+        let hasScreen = screenControl != nil
+        screenStatusLabel.isHidden = !hasScreen
+        screenLabel.isHidden = !hasScreen
+        screenSwitch.isHidden = !hasScreen
         // W29：「记录我的回复（用于记忆与推荐）」开关（首开弹显式确认文案，确认后才开）
         retainStatusLabel.font = W20Font.mono(11)
         retainStatusLabel.textColor = W20Color.gold
@@ -187,6 +208,13 @@ public final class W20MemoryPanel: NSObject {
         retainRow.orientation = .horizontal
         retainRow.spacing = 10
         retainRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
+        // W32：读屏行——状态显示 + 「读取屏幕内容以增强候选（需授权）」开关
+        let screenRow = NSStackView(views: [
+            screenStatusLabel, screenLabel, screenSwitch, NSView(),
+        ])
+        screenRow.orientation = .horizontal
+        screenRow.spacing = 10
+        screenRow.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 14)
         // W30：本地模型（7B）行——状态 + 开关 + 配置入口
         let modelRow = NSStackView(views: [
             modelStatusLabel, modelLabel, modelSwitch, NSView(),
@@ -226,7 +254,7 @@ public final class W20MemoryPanel: NSObject {
             topBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             topBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             topBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            topBar.heightAnchor.constraint(equalToConstant: 116),
+            topBar.heightAnchor.constraint(equalToConstant: 148),
             tabControl.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 12),
             tabControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             memoryPage.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: 12),
@@ -239,8 +267,8 @@ public final class W20MemoryPanel: NSObject {
             proposalPage.bottomAnchor.constraint(equalTo: memoryPage.bottomAnchor),
         ])
 
-        // topBar 内部：三行（状态行 + W29 留存开关行 + W30 本地模型行）
-        let topStack = NSStackView(views: [topRow, retainRow, modelRow])
+        // topBar 内部：四行（状态行 + W32 读屏开关行 + W29 留存开关行 + W30 本地模型行）
+        let topStack = NSStackView(views: [topRow, screenRow, retainRow, modelRow])
         topStack.orientation = .vertical
         topStack.spacing = 0
         topBar.addSubview(topStack)
@@ -408,6 +436,11 @@ public final class W20MemoryPanel: NSObject {
         if let c1 = c1Control {
             c1Switch.state = c1.isC1Enabled ? .on : .off
             c1StatusLabel.stringValue = c1.statusText
+        }
+        // W32：读屏开关与状态显示（未授权 →「读屏未授权」）
+        if let sc = screenControl {
+            screenSwitch.state = sc.isScreenEnabled ? .on : .off
+            screenStatusLabel.stringValue = sc.statusText
         }
         // W29：留存开关与状态显示
         if let r = retentionControl {
@@ -604,6 +637,21 @@ public final class W20MemoryPanel: NSObject {
             }
         } else {
             c1.setEnabled(false, explicitConfirm: true)
+        }
+        refreshStatus()
+    }
+
+    /// W32：「读取屏幕内容以增强候选（需授权）」读屏开关（C1 屏幕上下文显式 opt-in）。
+    /// **打开开关是 CGRequestScreenCaptureAccess 一次性授权请求的唯一发起点**（弹系统
+    /// TCC「想要录制此电脑的屏幕」确认框 = 授权确认；不另弹应用内确认框）；取消/拒绝 →
+    /// 开关保持开但状态行显示「读屏未授权」（采集跳过读屏，绝不自动再请求）。关闭 =
+    /// 停止读屏并清屏幕上下文。平时打字/语音路径只 CGPreflight 探活，零权限请求。
+    @objc private func onScreenToggled() {
+        guard let sc = screenControl else { return }
+        if screenSwitch.state == .on {
+            _ = sc.setEnabled(true, explicitConfirm: true)   // 含一次性 TCC 授权请求
+        } else {
+            _ = sc.setEnabled(false, explicitConfirm: true)  // 关闭即清屏幕上下文
         }
         refreshStatus()
     }

@@ -43,8 +43,13 @@ git clone --depth 1 https://github.com/rime/squirrel.git macos/squirrel
 cd macos/squirrel && git submodule update --init --recursive --depth 1 --recommend-shallow && cd ../..
 bash build/build-squirrel.sh      # applies build/squirrel-*.patch automatically (dev isolation + horizontal candidates + W7/W20 hooks)
 
-# 4) Install + deploy the "Wubi 86 + Pinyin hybrid" schema
-bash build/install-dev.sh         # installs to ~/Library/Input Methods/Squirrel-dev.app
+# 4) Stable dev signing identity (once per machine; idempotent) — keeps macOS TCC
+#    grants (screen recording / microphone) alive across reinstalls
+bash scripts/make-dev-cert.sh     # self-signed "Mine Input Dev" cert → login keychain
+#    (first signing may prompt "codesign wants to use a key" → click "Always Allow"; see docs/dev-signing-setup.md)
+
+# 5) Install + deploy the "Wubi 86 + Pinyin hybrid" schema
+bash build/install-dev.sh         # installs to ~/Library/Input Methods/Squirrel-dev.app (signed with "Mine Input Dev")
 ```
 
 After installing, add "**Mine Input** (提炼输入法)" (dev) under System Settings → Keyboard →

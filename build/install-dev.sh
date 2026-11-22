@@ -58,8 +58,28 @@ mkdir -p "$IM_DIR"
 pkill -f "$APP_DST/Contents/MacOS/Squirrel" 2>/dev/null && echo "(已停止旧 dev IME 进程)" || true
 rm -rf "$APP_DST"                       # 只删我们自己的 dev 产物
 cp -R "$APP_SRC" "$APP_DST"
-# 本地开发签名（ad-hoc）；不设 DEV_ID，不做公证
-codesign --force --deep --sign - "$APP_DST" 2>/dev/null || echo "(codesign ad-hoc skipped)"
+# W32 稳定签名身份（自签证书「Mine Input Dev」，scripts/make-dev-cert.sh 生成并导入
+# login keychain）：ad-hoc 签名的 cdhash 每次重装都变 → TCC 录屏/麦克风授权
+# 「Failed to match existing code requirement」永远弹窗（W27 弹窗风暴事故根因）。
+# 证书签名后 designated requirement 锚定 identifier + certificate（非 cdhash），
+# 授权跨重装/重建存活。找不到身份时回退 ad-hoc 并大声警告。
+SIGN_ID="Mine Input Dev"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$SIGN_ID\""; then
+  codesign --force --deep --sign "$SIGN_ID" "$APP_DST"
+  echo "已用稳定签名身份「${SIGN_ID}」签名（TCC 授权可跨重装存活）"
+else
+  echo "################################################################" >&2
+  echo "## W32 警告：找不到签名身份「${SIGN_ID}」——回退 ad-hoc 签名！" >&2
+  echo "## ad-hoc 的 cdhash 每次安装都变：TCC 录屏/麦克风授权跨重装失效，" >&2
+  echo "## 会反复弹「想要录制此电脑的屏幕」且同意无效（W27 事故根因复发）。" >&2
+  echo "## 修复：bash scripts/make-dev-cert.sh（生成自签证书并导入 keychain）" >&2
+  echo "##       后重跑本脚本；详见 docs/dev-signing-setup.md" >&2
+  echo "################################################################" >&2
+  codesign --force --deep --sign - "$APP_DST" 2>/dev/null || echo "(codesign ad-hoc skipped)"
+fi
+# W32 验收证据：designated requirement 必须含 identifier + certificate 锚（非 cdhash）
+echo "-- codesign designated requirement（W32 验收：应含 identifier 与 certificate，无 cdhash）--"
+codesign -dr- "$APP_DST" 2>&1 || true
 plutil -p "$APP_DST/Contents/Info.plist" | grep -E "CFBundleName|TISInputSourceID|RimeUserDir|InputMethodConnectionName" || true
 
 # W26 自检门：装机产物必须带 NSMicrophoneUsageDescription——缺此键时 macOS 静默拒绝

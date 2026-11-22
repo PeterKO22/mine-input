@@ -148,6 +148,22 @@ public protocol W20C1Control: AnyObject {
     func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool
 }
 
+/// W32「读取屏幕内容以增强候选（需授权）」开关控制抽象（C1 读屏显式开关；
+/// ⌥M 管理浮层开关 + 状态显示的数据源）。生产实现 = W12Privacy `c1_screen` 持久开关 +
+/// CGRequestScreenCaptureAccess 一次性授权请求（W20SquirrelGlue 注入）；测试用桩。
+/// 硬规则：**默认关**；打开开关是授权请求的唯一发起点（弹一次系统 TCC 确认框），
+/// 平时按键采集只 CGPreflightScreenCaptureAccess 探活，未授权跳过读屏（状态行
+/// 显示「读屏未授权」），绝不自动发起请求。
+public protocol W20ScreenContextControl: AnyObject {
+    /// 当前读屏开关态（持久 meta，默认关）。
+    var isScreenEnabled: Bool { get }
+    /// 状态显示行（如「读屏：关（默认…）」/「读屏未授权（…）」）。
+    var statusText: String { get }
+    /// 开关（explicitConfirm 必须为 true——UI 开关动作后传入；true=开启并一次性请求 TCC）。
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool
+}
+
 /// W29「记录我的回复（用于记忆与推荐）」开关控制抽象（⌥M 管理浮层开关 + 首开显式确认）。
 /// 生产实现 = W12Privacy 上屏文本留存（L3）持久开关（W20SquirrelGlue 注入）；测试用桩。
 /// 首次开启须经 `consentText` 确认弹窗（留存什么/干嘛用/本地存储/随时可关/清空连事件一起）。

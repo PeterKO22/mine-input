@@ -33,6 +33,76 @@ public enum W12CaptureError: Error, CustomStringConvertible {
     }
 }
 
+// ------------------------------------------------------------ W32 读屏门禁（显式 opt-in）
+
+/// W32 录屏 TCC 授权探针/请求（CGPreflightScreenCaptureAccess / CGRequestScreenCaptureAccess）。
+/// 默认实现走系统 API；单测/探针注入 mock（授权状态可注入），门禁逻辑伪时钟可测。
+///
+/// 硬规则（W27 弹窗风暴事故根治）：
+///   - **采集路径只用 `preflight` 探活**（CGPreflightScreenCaptureAccess 不弹窗、不请求）；
+///   - **`requestAccess` 唯一发起点 = ⌥M「读取屏幕内容以增强候选（需授权）」开关打开动作**
+///     （一次性授权请求，弹系统 TCC 确认框）；打字/语音路径绝不调用（零权限请求）。
+public struct W12ScreenAccess {
+    /// 探活：当前进程是否已获录屏授权（不弹窗、不发起请求）。
+    public var preflight: () -> Bool
+    /// 发起一次性授权请求（弹系统 TCC「想要录制此电脑的屏幕」；仅 ⌥M 开关打开时调用）。
+    public var requestAccess: () -> Bool
+
+    public init(preflight: @escaping () -> Bool, requestAccess: @escaping () -> Bool) {
+        self.preflight = preflight
+        self.requestAccess = requestAccess
+    }
+
+    /// 生产实现（CoreGraphics TCC 桥）。
+    public static func live() -> W12ScreenAccess {
+        W12ScreenAccess(
+            preflight: { CGPreflightScreenCaptureAccess() },
+            requestAccess: { CGRequestScreenCaptureAccess() })
+    }
+}
+
+/// W32 读屏门禁纯逻辑（零副作用、零 TCC 调用；单测真值表全覆盖）。
+///
+/// 语义：屏幕上下文**默认 OFF**——只有 ⌥M 显式开关（持久 `c1_screen`）打开才读屏；
+/// 开关开但系统未授权 → **跳过读屏**（绝不自动发起授权请求），⌥M 状态行显示「读屏未授权」。
+public enum W12ScreenGate {
+    public enum Decision: Equatable {
+        /// 允许读屏（开关开 + 已授权）。
+        case readScreen
+        /// 读屏开关关（默认）→ 跳过读屏。
+        case skipSwitchOff
+        /// 开关开但未授权 → 跳过读屏（绝不自动请求授权）。
+        case skipNotAuthorized
+    }
+
+    /// 跳过原因（采集日志/探针逐字断言锚点）。
+    public static let skipSwitchOffReason =
+        "读屏开关关（默认关；⌥M「读取屏幕内容以增强候选（需授权）」开启才读屏）"
+    public static let skipNotAuthorizedReason =
+        "读屏未授权（CGPreflightScreenCaptureAccess=false；跳过读屏，绝不自动发起授权请求）"
+
+    /// 门禁判定（`screenAuthorized` 为 @autoclosure：开关关时**不触碰**授权探针——
+    /// 默认态零权限交互）。
+    public static func decide(
+        screenSwitchOn: Bool,
+        screenAuthorized: @autoclosure () -> Bool
+    ) -> Decision {
+        guard screenSwitchOn else { return .skipSwitchOff }
+        guard screenAuthorized() else { return .skipNotAuthorized }
+        return .readScreen
+    }
+
+    /// ⌥M 状态行文案（未授权必含「读屏未授权」）。
+    public static func statusText(screenSwitchOn: Bool, screenAuthorized: Bool) -> String {
+        guard screenSwitchOn else {
+            return "读屏：关（默认；「读取屏幕内容以增强候选（需授权）」开启才读屏）"
+        }
+        return screenAuthorized
+            ? "读屏：开（已授权）"
+            : "读屏未授权（系统设置→隐私与安全性→屏幕录制 允许「提炼输入法」；授权后 pkill+open 重启生效）"
+    }
+}
+
 public enum W12ScreenCapture {
     /// 取一帧 CGImage（屏幕快照或文件源）。
     public static func captureCGImage(_ source: W12CaptureSource) async throws -> CGImage {

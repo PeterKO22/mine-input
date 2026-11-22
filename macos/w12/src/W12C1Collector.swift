@@ -81,6 +81,12 @@ public final class W12C1Collector {
     /// W27 注入探针/测试用：非 nil 时采集走该源（文件源=等价一帧截屏，同一 OCR→摘要→
     /// 入库链路）；生产恒 nil（走 .screen ScreenCaptureKit）。
     public var captureSourceOverride: W12CaptureSource? = nil
+    /// W32 注入探针/测试用：非 nil 时屏幕帧取自该闭包（免真实 ScreenCaptureKit/TCC）；
+    /// 生产恒 nil（走 W12ScreenCapture.captureCGImage）。
+    public var captureImageOverride: ((W12CaptureSource) async throws -> CGImage)? = nil
+    /// W32 录屏授权探针/请求注入（授权状态可 mock；生产 = CGPreflight/CGRequest）。
+    /// 硬规则：采集路径只 `preflight` 探活；`requestAccess` 唯一发起点 = ⌥M 开关打开动作。
+    public var screenAccess: W12ScreenAccess = .live()
     /// W27-fix 防抖时钟注入（默认 `Date()` 墙钟，生产行为不变）：探针/单测传伪时间，
     /// 消除「用真实 sleep 模拟事件间隔」撞防抖窗的时序竞态（w27-e2e 确定性化的落点）。
     public var clock: () -> TimeInterval = { Date().timeIntervalSince1970 }
@@ -97,6 +103,12 @@ public final class W12C1Collector {
     /// C1 总开关（显式）：Info.plist W12C1Enabled 或运行时 meta 显式开启。
     public var isC1Enabled: Bool {
         settings.c1Enabled || W12Privacy.isC1ExplicitlyEnabled(store: bridge.store)
+    }
+
+    /// W32 读屏（屏幕上下文）有效开关：⌥M 显式开关（持久 meta `c1_screen`，默认关）
+    /// 或 dev 直通（W12C1Screen/MINE_W12_*，探针用）。**默认 OFF**——不开启绝不读屏。
+    public var isScreenEnabled: Bool {
+        settings.c1Screen || W12Privacy.isC1ScreenEnabled(store: bridge.store)
     }
 
     // ------------------------------------------------------------ 触发
@@ -117,7 +129,8 @@ public final class W12C1Collector {
     ///   - `.pttEnd`：PTT 结束收口触发窗（不采集）。
     ///
     /// 门禁照旧：C1 显式开关（默认关）/ 密码框（secureInput）零采集 / 熔断立即停 /
-    /// 黑名单跳过。
+    /// 黑名单跳过；**W32 读屏门禁**：屏幕上下文默认 OFF（⌥M 显式开关才读屏），
+    /// 开关开但未授权 → 跳过读屏（只 CGPreflight 探活，绝不自动 CGRequest）。
     public func onInputEvent(
         _ trigger: W12InputTrigger,
         appId: String?, secureInput: Bool,
@@ -139,8 +152,9 @@ public final class W12C1Collector {
             completion?(.refused("C1 collection disabled (default off; 需显式开启)"))
             return
         }
-        guard settings.c1Screen else {
-            completion?(.skipped("c1 screen sub-switch off"))
+        // W32：读屏开关关（屏幕上下文默认 OFF）→ 跳过读屏，零权限交互零防抖状态。
+        guard isScreenEnabled else {
+            completion?(.skipped(W12ScreenGate.skipSwitchOffReason))
             return
         }
         let now = clock()
@@ -216,11 +230,25 @@ public final class W12C1Collector {
         if case .skipped(let reason) = precheck(appId: appId, secureInput: secureInput) {
             return .skipped(reason)
         }
+        // W32 读屏门禁（仅真实屏幕源；文件源 = 探针等价帧，不涉 TCC）：
+        // 开关关（默认）/ 未授权 → 跳过读屏；未授权**绝不**自动发起授权请求（只探活）。
+        if case .screen = source {
+            switch W12ScreenGate.decide(
+                screenSwitchOn: isScreenEnabled,
+                screenAuthorized: screenAccess.preflight()) {
+            case .readScreen:
+                break
+            case .skipSwitchOff:
+                return .skipped(W12ScreenGate.skipSwitchOffReason)
+            case .skipNotAuthorized:
+                return .skipped(W12ScreenGate.skipNotAuthorizedReason)
+            }
+        }
         markCaptured()
 
         let cgImage: CGImage
         do {
-            cgImage = try await W12ScreenCapture.captureCGImage(source)
+            cgImage = try await (captureImageOverride ?? W12ScreenCapture.captureCGImage)(source)
         } catch {
             return .refused("capture failed: \(error)")
         }
@@ -308,14 +336,14 @@ public final class W12C1Collector {
 
     /// 构造推荐链请求上下文（智能候选 / ⌥Esc 提词浮层共用的 SuggestContext 请求链）：
     /// `screenText` = 近期 OCR 摘要（ScreenTextContext 截断拼接），**仅当**
-    /// C1 显式开启、未熔断、非密码框（secureInput）时填充；任一不满足即空串
-    /// （C1 默认关 → 默认空串，屏幕文本绝不上报第三方）。
+    /// C1 显式开启、读屏开关开（W32 屏幕上下文默认 OFF）、未熔断、非密码框
+    /// （secureInput）时填充；任一不满足即空串（默认空串，屏幕文本绝不上报第三方）。
     public func makeSuggestContext(
         beforeCursor: String, appId: String = "",
         fromVoice: Bool = false, secureInput: Bool = false
     ) -> SuggestContext {
         let screenText: String
-        if isC1Enabled, !bridge.breaker.isTripped, !secureInput {
+        if isC1Enabled, isScreenEnabled, !bridge.breaker.isTripped, !secureInput {
             screenText = screenContext.recentSummary()
         } else {
             screenText = ""

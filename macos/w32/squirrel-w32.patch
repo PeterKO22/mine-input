@@ -1,0 +1,25 @@
+# W32 stable-signing-and-c1-optin 集成补丁（可复现记录；前置 dev+w7+w12+w20+w26+w27+w28+w29+w30+w31 补丁链）
+#
+# 修改 Squirrel 既有 1 文件：
+#   - resources/Info.plist：W12C1Screen <true/> → <false/>——「屏幕上下文默认 OFF」
+#     （W32 读屏显式开关：⌥M「读取屏幕内容以增强候选（需授权）」持久 meta c1_screen
+#      才开；不开启绝不读屏、绝不发起 CGRequest——W27 弹窗风暴根治的一半）。
+#     W12C1Enabled 维持 <false/>（C1 总开关默认关不变）。
+#
+# 注意：W20 读屏开关（W20ScreenContextControl/W20SquirrelScreenControl/W20MemoryPanel
+# 读屏行）与 W12 门禁（W12ScreenGate/W12ScreenAccess/W12C1Collector）都在 ../w20、../w12
+# （唯一事实源，pbxproj 已引用），不在 Squirrel 树内——故本补丁只有 Info.plist 一处。
+#
+# 应用方式：在已套用补丁链的 macos/squirrel 上
+#   bash macos/w32/scripts/apply-w32.sh
+--- a/resources/Info.plist
++++ b/resources/Info.plist
+@@ -130,7 +130,7 @@
+ 	<key>W12C1Enabled</key>
+ 	<false/>
+ 	<key>W12C1Screen</key>
+-	<true/>
++	<false/>
+ 	<key>W12C1Audio</key>
+ 	<true/>
+ 	<key>W12PrompterEnabled</key>

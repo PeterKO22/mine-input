@@ -39,8 +39,12 @@ git clone --depth 1 https://github.com/rime/squirrel.git macos/squirrel
 cd macos/squirrel && git submodule update --init --recursive --depth 1 --recommend-shallow && cd ../..
 bash build/build-squirrel.sh      # 自动打 build/squirrel-*.patch（dev 隔离 + 候选横排 + W7/W20 挂点）
 
-# 4) 安装 + 部署「五笔86+拼音混合」方案
-bash build/install-dev.sh         # 装入 ~/Library/Input Methods/Squirrel-dev.app
+# 4) 稳定开发签名证书（每台机器一次，幂等）——TCC 录屏/麦克风授权跨重装存活
+bash scripts/make-dev-cert.sh     # 自签「Mine Input Dev」证书 → login keychain
+#    （首次签名可能弹「codesign 想使用密钥」→ 点一次「始终允许」；见 docs/dev-signing-setup.md）
+
+# 5) 安装 + 部署「五笔86+拼音混合」方案
+bash build/install-dev.sh         # 装入 ~/Library/Input Methods/Squirrel-dev.app（以「Mine Input Dev」签名）
 ```
 
 装完在 系统设置 → 键盘 → 输入法 添加「**提炼输入法**」（dev）。验证：

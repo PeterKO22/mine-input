@@ -128,14 +128,30 @@ func cmdPrivacy(_ args: [String]) {
             W12Privacy.disableCommitTextRetention(store: bridge.store)
             print("retain explicit disable: meta commit_text_retention=0（新事件 text_out 不再留存）")
         }
+    case "c1screen":
+        // W32 读屏（屏幕上下文）显式开关：on 需 --confirm（等价 ⌥M「读取屏幕内容以增强候选
+        //（需授权）」开关打开动作；CLI 不发起 TCC 授权请求——CGRequest 只在 ⌥M 开关处）。
+        let action = args.count > 1 ? args[1] : "status"
+        if action == "on" {
+            guard opts.confirm else {
+                fputs("c1screen on 需 --confirm（防误触；等价 ⌥M 开关显式打开）\n", stderr)
+                exit(2)
+            }
+            let ok = W12Privacy.enableC1Screen(store: bridge.store, explicitConfirm: true)
+            print("c1screen explicit enable: \(ok)（meta c1_screen=1；CLI 不发起 CGRequest——授权请求只在 ⌥M 开关打开时一次性发起）")
+        } else if action == "off" {
+            W12Privacy.disableC1Screen(store: bridge.store)
+            print("c1screen explicit disable: meta c1_screen=0（关闭即清屏幕上下文环）")
+        }
     default:
         break
     }
     let settings = W12Settings.load()
     let explicit = W12Privacy.isC1ExplicitlyEnabled(store: bridge.store)
+    let screenExplicit = W12Privacy.isC1ScreenEnabled(store: bridge.store)
     print("== W12 隐私设置 ==")
     print("C1 总开关: \(settings.c1Enabled || explicit)（Info.plist W12C1Enabled=\(settings.c1Enabled) + 显式 meta=\(explicit)；**默认关**）")
-    print("  子开关: screen=\(settings.c1Screen) audio=\(settings.c1Audio)")
+    print("  子开关: screen=\(settings.c1Screen || screenExplicit)（W32 读屏显式开关 meta=\(screenExplicit)，**默认关**；w12ctl privacy c1screen on --confirm 可开） audio=\(settings.c1Audio)")
     print("  触发: 仅输入时（PTT 期间 + 按键触发窗），防抖 \(Int(settings.debounceSeconds))s")
     print("  安全输入（密码框）: 自动停不可关（IsSecureEventInputEnabled）")
     print("  黑名单: \(C0Collector.defaultBlacklist.count) 个敏感应用，命中跳过")
@@ -434,8 +450,9 @@ func cmdW27E2E(_ args: [String]) {
         }
         bridge = W12EventBridge(path: probeDB)
     }
-    // 状态起止复位：C1 显式开关/熔断绝不跨案例、跨轮泄漏。
+    // 状态起止复位：C1 显式开关/读屏开关/熔断绝不跨案例、跨轮泄漏。
     W12Privacy.disableC1(store: bridge.store)
+    W12Privacy.disableC1Screen(store: bridge.store)
     bridge.breaker.reset()
     var failures = 0
     func check(_ ok: Bool, _ label: String) {
@@ -486,6 +503,17 @@ func cmdW27E2E(_ args: [String]) {
 
     // ---- 场景 1：开 C1 → 打字 → screen+OCR 条目 + SuggestContext 带屏幕文本
     W12Privacy.enableC1(store: bridge.store, explicitConfirm: true)
+    // ---- 场景 0（W32 读屏门禁）：C1 开但读屏开关关（默认 OFF）→ 跳过读屏，零采集零权限交互
+    do {
+        let out0s = fireEvent(.keystroke, secureInput: false)
+        if case .skipped(let r) = out0s, r == W12ScreenGate.skipSwitchOffReason {
+            check(true, "W32 读屏开关关（默认 OFF）→ 跳过读屏：\(r)")
+        } else {
+            check(false, "读屏开关关应 skipped(skipSwitchOffReason)（实际 \(out0s)）")
+        }
+    }
+    // ⌥M 显式开关打开（持久 meta c1_screen=1）→ 读屏恢复
+    W12Privacy.enableC1Screen(store: bridge.store, explicitConfirm: true)
     // 首键触发采集（异步 OCR）；同会话**同一伪时刻**连打 5 键（t+0.0s，必落防抖窗内
     // ——确定性合并断言，不再依赖真实打字速度/OCR 耗时）。
     let sem1 = DispatchSemaphore(value: 0)
@@ -576,6 +604,7 @@ func cmdW27E2E(_ args: [String]) {
 
     // 起止复位：不留跨轮状态（独立库下亦保持卫生习惯）
     W12Privacy.disableC1(store: bridge.store)
+    W12Privacy.disableC1Screen(store: bridge.store)
     bridge.breaker.reset()
     print("== 结果：\(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ==")
     exit(failures == 0 ? 0 : 1)
@@ -609,6 +638,7 @@ guard let cmd = args.first else {
     usage: w12ctl <privacy|c1|bridge|prompter|breaker|hub-token|w27-e2e> ...
       privacy status | privacy c1 on|off
       privacy retain on --confirm | privacy retain off   # W29 上屏文本留存(L3) 持久开关（on 需 --confirm 防误触）
+      privacy c1screen on --confirm | privacy c1screen off   # W32 读屏（屏幕上下文）显式开关（默认关；CLI 不发起 TCC 请求）
       c1 status | c1 gen-image <png> | c1 ocr --image <png> | c1 capture --source screen
       c1 asr --wav <wav> | c1 trigger --keys N [--image <png>]
       bridge demo

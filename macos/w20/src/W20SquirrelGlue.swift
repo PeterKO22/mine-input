@@ -12,6 +12,7 @@
 // 任何自动 confirm 路径。
 #if !W20_STANDALONE
 import AppKit
+import CoreGraphics
 import Foundation
 
 #if canImport(ContextCore)
@@ -51,6 +52,7 @@ final class W20SquirrelHooks {
                 breaker: W20SquirrelBreaker(),
                 engine: W20CppProposalEngine(),  // 提案卡接 C++ Null 提案桩
                 c1Control: W20SquirrelC1Control(),  // W27：C1 开关 + 状态显示
+                screenControl: W20SquirrelScreenControl(),  // W32：读屏显式开关（默认关）
                 retentionControl: W20SquirrelRetentionControl(),  // W29：记录我的回复开关
                 modelControl: W20ModelServiceControl())  // W30：本地模型（7B）显式开关（不开不加载）
         }
@@ -92,7 +94,9 @@ final class W20SquirrelC1Control: W20C1Control {
         let s = W12Settings.load()
         if isC1Enabled {
             var parts: [String] = []
-            if s.c1Screen { parts.append("屏幕") }
+            if s.c1Screen || W12Privacy.isC1ScreenEnabled(store: W12EventBridge.shared.store) {
+                parts.append("屏幕")
+            }
             if s.c1Audio { parts.append("语音") }
             return "C1：开（\(parts.isEmpty ? "无子项" : parts.joined(separator: "+"))，仅输入时，防抖 \(Int(s.debounceSeconds))s）"
         }
@@ -105,6 +109,38 @@ final class W20SquirrelC1Control: W20C1Control {
                 store: W12EventBridge.shared.store, explicitConfirm: explicitConfirm)
         }
         W12Privacy.disableC1(store: W12EventBridge.shared.store)
+        return true
+    }
+}
+
+// MARK: - W32 读屏开关同源（W12Privacy c1_screen / W12ScreenGate，⌥M「读取屏幕内容以增强候选」）
+
+/// W32：⌥M 管理浮层「读取屏幕内容以增强候选（需授权）」开关的数据源——与采集链路共用
+/// W12Privacy 持久开关（store meta `c1_screen`，跨进程持久，**默认关**）。
+/// 硬规则：`setEnabled(true)` 是 **CGRequestScreenCaptureAccess 一次性授权请求的唯一
+/// 发起点**（弹系统 TCC 确认框）；平时按键采集只 CGPreflightScreenCaptureAccess 探活，
+/// 未授权跳过读屏 + 状态行「读屏未授权」，打字/语音路径绝不自动发起请求。
+final class W20SquirrelScreenControl: W20ScreenContextControl {
+    var isScreenEnabled: Bool {
+        W12Privacy.isC1ScreenEnabled(store: W12EventBridge.shared.store)
+            || W12Settings.load().c1Screen
+    }
+    var statusText: String {
+        W12ScreenGate.statusText(
+            screenSwitchOn: isScreenEnabled,
+            screenAuthorized: CGPreflightScreenCaptureAccess())
+    }
+    @discardableResult
+    func setEnabled(_ on: Bool, explicitConfirm: Bool) -> Bool {
+        guard explicitConfirm else { return false }
+        if on {
+            W12Privacy.enableC1Screen(
+                store: W12EventBridge.shared.store, explicitConfirm: true)
+            // 一次性授权请求（唯一发起点；已授权/已拒绝时 CGRequest 立即返回不重复弹窗）
+            _ = W12ScreenAccess.live().requestAccess()
+            return true
+        }
+        W12Privacy.disableC1Screen(store: W12EventBridge.shared.store)
         return true
     }
 }

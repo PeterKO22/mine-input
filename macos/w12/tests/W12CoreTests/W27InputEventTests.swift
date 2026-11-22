@@ -18,7 +18,9 @@ final class W27InputEventTests: XCTestCase {
         dbPath = NSTemporaryDirectory() + "w27-test-\(UUID().uuidString).db"
         bridge = W12EventBridge(path: dbPath)
         screen = ScreenTextContext()
-        collector = W12C1Collector(bridge: bridge, settings: W12Settings())
+        // W32 起读屏子开关默认 OFF（「屏幕上下文默认 OFF」）——本套件测的就是读屏链路，
+        // 夹具显式置开（等价 ⌥M「读取屏幕内容以增强候选（需授权）」开关打开）。
+        collector = W12C1Collector(bridge: bridge, settings: W12Settings(c1Screen: true))
         collector.screenContext = screen
     }
 
